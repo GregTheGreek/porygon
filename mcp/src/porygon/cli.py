@@ -70,9 +70,14 @@ def cmd_read_attributes(args) -> int:
 def _resolver(args):
     from porygon.core.diagnostics import SymbolResolver
 
-    elf = _project(args).elf_path()
+    project = _project(args)
+    elf = project.elf_path()
     if elf is None:
-        raise ProjectError("no built ELF found (pokeemerald_modern.elf / pokeemerald.elf)")
+        raise ProjectError(
+            f"no built ELF in {project.root} (looked for pokeemerald_modern.elf / "
+            f"pokeemerald.elf). Build the project first (`porygon build` or your own build) "
+            f"- symbol/address resolution reads the compiled ELF."
+        )
     return SymbolResolver(elf)
 
 
