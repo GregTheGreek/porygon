@@ -18,6 +18,7 @@ from mcp.server.fastmcp import FastMCP
 
 from porygon.core import build as buildmod
 from porygon.core import emu as emumod
+from porygon.core import imaging as imagingmod
 from porygon.core import scripting as scriptmod
 from porygon.core.blockdata import Blockdata
 from porygon.core.diagnostics import SymbolResolver, parse_build_errors
@@ -266,6 +267,33 @@ def poryscript_status(root: Optional[str] = None) -> dict:
 def compile_poryscript(pory_path: str, inc_path: str, root: Optional[str] = None) -> dict:
     """Compile a .pory to a .inc (only if poryscript is available for this project)."""
     return scriptmod.compile_poryscript(_project(root), pory_path, inc_path)
+
+
+@mcp.tool()
+def porytiles_status(root: Optional[str] = None) -> dict:
+    """Report whether Porytiles (the tileset compiler) is installed + its version."""
+    return imagingmod.porytiles_status(_project(root))
+
+
+@mcp.tool()
+def validate_image(image_path: str, root: Optional[str] = None) -> dict:
+    """Check an image is usable for map generation (dims a multiple of 16px)."""
+    return imagingmod.validate_image(image_path)
+
+
+@mcp.tool()
+def image_to_map(image_path: str, name: str, full_auto: bool = False,
+                 root: Optional[str] = None) -> dict:
+    """Turn an image into a NEW tileset + NEW layout, reviewable in Porymap.
+
+    porygon dedups 16x16 cells + records placement; Porytiles compiles the tileset.
+    full_auto=False (default) leaves collision passable for human review; full_auto=True
+    applies a coarse collision suggestion. Requires Porytiles installed (check
+    porytiles_status first). Best for tile-aligned / pixel-art images; complex images
+    make Porytiles error on palette overflow (surfaced). The generated tileset is
+    viewable in Porymap but needs C registration to build into the ROM.
+    """
+    return imagingmod.image_to_map(_project(root), image_path, name, full_auto=full_auto)
 
 
 def main() -> None:

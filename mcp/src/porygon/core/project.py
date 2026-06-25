@@ -129,6 +129,55 @@ class Project:
         raw = self._resolve(layout.border_filepath).read_bytes()
         return decode_blocks(raw)
 
+    def add_layout(self, layout_id: str, name: str, width: int, height: int,
+                   primary_tileset: str, secondary_tileset: str) -> dict:
+        """Register a new layout in layouts.json and create its dir (border + map.bin paths).
+
+        Returns the new layout dict (with resolved filepaths). Does not write the
+        blockdata - caller writes map.bin/border.bin to the returned paths.
+        """
+        data = self._layouts_json()
+        if any(l and l.get("id") == layout_id for l in data["layouts"]):
+            raise ProjectError(f"layout {layout_id!r} already exists")
+        # Derive a folder name from the layout's display name (strip a _Layout suffix).
+        folder = name[:-len("_Layout")] if name.endswith("_Layout") else name
+        layout_dir = self.root / "data" / "layouts" / folder
+        layout_dir.mkdir(parents=True, exist_ok=True)
+        entry = {
+            "id": layout_id,
+            "name": name,
+            "width": width,
+            "height": height,
+            "primary_tileset": primary_tileset,
+            "secondary_tileset": secondary_tileset,
+            "border_filepath": f"data/layouts/{folder}/border.bin",
+            "blockdata_filepath": f"data/layouts/{folder}/map.bin",
+        }
+        data["layouts"].append(entry)
+        (self.root / "data" / "layouts" / "layouts.json").write_text(json.dumps(data, indent=2) + "\n")
+        return entry
+
+    # --- tilesets / fieldmap --------------------------------------------
+    def tiles_per_metatile(self) -> int:
+        """8 (vanilla, dual-layer) or 12 (expansion, triple-layer). Default 8."""
+        fieldmap = self.root / "include" / "fieldmap.h"
+        if fieldmap.exists():
+            import re
+            m = re.search(r"#define\s+NUM_TILES_PER_METATILE\s+(\d+)", fieldmap.read_text())
+            if m:
+                return int(m.group(1))
+        return 8
+
+    def is_dual_layer(self) -> bool:
+        return self.tiles_per_metatile() == 8
+
+    def metatile_behaviors_header(self) -> Path:
+        return self.root / "include" / "constants" / "metatile_behaviors.h"
+
+    def tileset_dir(self, name: str, secondary: bool = True) -> Path:
+        kind = "secondary" if secondary else "primary"
+        return self.root / "data" / "tilesets" / kind / name
+
     # --- maps ------------------------------------------------------------
     def _maps_dir(self) -> Path:
         return self.root / "data" / "maps"

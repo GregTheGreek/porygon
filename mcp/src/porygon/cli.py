@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 
 from porygon.core.diagnostics import SymbolError
+from porygon.core.imaging import ImagingError
 from porygon.core.project import Project, ProjectError
 
 
@@ -166,6 +167,24 @@ def cmd_remove_event(args) -> int:
     return _emit({"written": str(_project(args).remove_event(args.map, args.kind, args.index))})
 
 
+def cmd_porytiles_status(args) -> int:
+    from porygon.core import imaging
+
+    return _emit(imaging.porytiles_status(_project(args)))
+
+
+def cmd_validate_image(args) -> int:
+    from porygon.core import imaging
+
+    return _emit(imaging.validate_image(args.image))
+
+
+def cmd_image_to_map(args) -> int:
+    from porygon.core import imaging
+
+    return _emit(imaging.image_to_map(_project(args), args.image, args.name, full_auto=args.full_auto))
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="porygon", description="pokeemerald deterministic primitives")
     p.add_argument("--root", help="project root (default: auto-detect from cwd)")
@@ -250,6 +269,20 @@ def build_parser() -> argparse.ArgumentParser:
     rme.add_argument("index", type=int)
     rme.set_defaults(func=cmd_remove_event)
 
+    sub.add_parser("porytiles-status", help="report Porytiles availability/version").set_defaults(
+        func=cmd_porytiles_status
+    )
+
+    vi = sub.add_parser("validate-image", help="check an image is usable (dims multiple of 16)")
+    vi.add_argument("image")
+    vi.set_defaults(func=cmd_validate_image)
+
+    im = sub.add_parser("image-to-map", help="image -> new tileset + layout (reviewable in Porymap)")
+    im.add_argument("image")
+    im.add_argument("name", help="base name, e.g. MyTown")
+    im.add_argument("--full-auto", action="store_true", help="apply collision suggestions (no review)")
+    im.set_defaults(func=cmd_image_to_map)
+
     return p
 
 
@@ -257,7 +290,7 @@ def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
     try:
         return args.func(args)
-    except (ProjectError, SymbolError, FileNotFoundError, ValueError, OSError) as e:
+    except (ProjectError, SymbolError, ImagingError, FileNotFoundError, ValueError, OSError) as e:
         json.dump({"error": str(e)}, sys.stderr, indent=2)
         sys.stderr.write("\n")
         return 2
