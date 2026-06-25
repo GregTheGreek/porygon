@@ -2,7 +2,7 @@
 
 import pytest
 
-from poryml.core.project import ProjectError
+from porygon.core.project import ProjectError
 
 
 def test_info(project):

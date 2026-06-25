@@ -1,11 +1,11 @@
-"""poryml MCP server: exposes the core primitives as MCP tools.
+"""porygon MCP server: exposes the core primitives as MCP tools.
 
 Project root resolution order:
   1. the ``root`` argument passed to a tool, if given
-  2. the ``PORYML_PROJECT_ROOT`` environment variable
+  2. the ``PORYGON_PROJECT_ROOT`` environment variable
   3. auto-detect by walking up from the current working directory
 
-Run with:  uv run python -m poryml.server   (stdio transport)
+Run with:  uv run python -m porygon.server   (stdio transport)
 """
 
 from __future__ import annotations
@@ -16,16 +16,16 @@ from typing import Optional
 
 from mcp.server.fastmcp import FastMCP
 
-from poryml.core.blockdata import Blockdata
-from poryml.core.project import Project
+from porygon.core.blockdata import Blockdata
+from porygon.core.project import Project
 
-mcp = FastMCP("poryml")
+mcp = FastMCP("porygon")
 
 
 def _project(root: Optional[str] = None) -> Project:
     if root:
         return Project(Path(root))
-    env_root = os.environ.get("PORYML_PROJECT_ROOT")
+    env_root = os.environ.get("PORYGON_PROJECT_ROOT")
     return Project.locate(Path(env_root) if env_root else None)
 
 
