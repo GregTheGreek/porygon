@@ -155,9 +155,48 @@ class Project:
         raw = self._resolve(attributes_path).read_bytes()
         return decode_attributes(raw)
 
+    # --- build artifacts -------------------------------------------------
+    def _artifact(self, modern_name: str, agbcc_name: str, prefer_modern: bool = True):
+        """Return whichever built artifact exists, preferring modern."""
+        modern = self.root / modern_name
+        agbcc = self.root / agbcc_name
+        order = (modern, agbcc) if prefer_modern else (agbcc, modern)
+        for p in order:
+            if p.exists():
+                return p
+        return None
+
+    def elf_path(self):
+        return self._artifact("pokeemerald_modern.elf", "pokeemerald.elf")
+
+    def map_path(self):
+        return self._artifact("pokeemerald_modern.map", "pokeemerald.map")
+
+    def rom_path(self):
+        return self._artifact("pokeemerald_modern.gba", "pokeemerald.gba")
+
+    def debug_print_status(self) -> dict:
+        """Whether debug prints are compiled in (NDEBUG controls it in config.h)."""
+        config = self.root / "include" / "config.h"
+        if not config.exists():
+            return {"config_found": False, "debug_prints_enabled": False}
+        ndebug_defined = False
+        for line in config.read_text().splitlines():
+            s = line.strip()
+            if s.startswith("#define NDEBUG"):
+                ndebug_defined = True
+                break
+        return {
+            "config_found": True,
+            "ndebug_defined": ndebug_defined,
+            # mgba_printf etc. emit output only when NDEBUG is NOT defined.
+            "debug_prints_enabled": not ndebug_defined,
+        }
+
     # --- summary ---------------------------------------------------------
     def info(self) -> dict:
         layouts = self.list_layouts()
+        elf = self.elf_path()
         return {
             "root": str(self.root),
             "layout_count": len(layouts),
@@ -165,4 +204,6 @@ class Project:
             "has_modern_target": "modern" in (self.root / "Makefile").read_text()
             if (self.root / "Makefile").exists()
             else False,
+            "built_elf": str(elf) if elf else None,
+            "debug_prints_enabled": self.debug_print_status().get("debug_prints_enabled"),
         }

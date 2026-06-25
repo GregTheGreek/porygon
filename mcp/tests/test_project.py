@@ -42,3 +42,18 @@ def test_list_and_read_map(project):
 def test_resolve_rejects_escape(project):
     with pytest.raises(ProjectError):
         project._resolve("../../../etc/passwd")
+
+
+def test_debug_print_status(project):
+    status = project.debug_print_status()
+    assert status["config_found"] is True
+    # Stock pokeemerald ships with NDEBUG defined -> debug prints off.
+    assert isinstance(status["debug_prints_enabled"], bool)
+
+
+def test_artifact_paths_are_consistent(project):
+    # If a built ELF exists, it should sit at the project root.
+    elf = project.elf_path()
+    if elf is not None:
+        assert elf.parent == project.root
+        assert elf.suffix == ".elf"
