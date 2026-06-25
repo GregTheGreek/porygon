@@ -245,6 +245,63 @@ def remove_event(map: str, kind: str, index: int, root: Optional[str] = None) ->
 
 
 @mcp.tool()
+def add_warp(map: str, event: dict, root: Optional[str] = None) -> dict:
+    """Append a warp_event (door/exit) to a map.json.
+
+    event needs: x, y, elevation, dest_map (a MAP_ id), dest_warp_id. Validates
+    that dest_map exists and dest_warp_id indexes a real warp on it.
+    """
+    path = _project(root).add_warp(map, event)
+    return {"written": str(path)}
+
+
+@mcp.tool()
+def add_bg_event(map: str, event: dict, root: Optional[str] = None) -> dict:
+    """Append a bg_event by its 'type': sign, hidden_item, or secret_base.
+
+    Required fields per type (plus x/y/elevation):
+    - sign: player_facing_dir, script
+    - hidden_item: item, flag (forks may also accept quantity, underfoot)
+    - secret_base: secret_base_id
+    """
+    path = _project(root).add_bg_event(map, event)
+    return {"written": str(path)}
+
+
+@mcp.tool()
+def get_connections(map: str, root: Optional[str] = None) -> dict:
+    """List a map's directional connections (neighbouring maps + offsets)."""
+    return {"connections": _project(root).read_connections(map)}
+
+
+@mcp.tool()
+def edit_connection(map: str, action: str, direction: Optional[str] = None,
+                    offset: Optional[int] = None, dest_map: Optional[str] = None,
+                    index: Optional[int] = None, root: Optional[str] = None) -> dict:
+    """Add/update/remove a map connection (up/down/left/right/dive/emerge).
+
+    - add: needs direction, offset, dest_map
+    - update: locate by direction (or index); set offset and/or dest_map
+    - remove: locate by direction (or index)
+    Validates dest_map exists.
+    """
+    path = _project(root).edit_connection(
+        map, action, direction=direction, offset=offset, dest_map=dest_map, index=index
+    )
+    return {"written": str(path)}
+
+
+@mcp.tool()
+def set_map_properties(map: str, properties: dict, root: Optional[str] = None) -> dict:
+    """Update top-level map metadata: weather, music, map_type, battle_scene,
+    region_map_section, and flags (requires_flash, allow_cycling, allow_escaping,
+    allow_running, show_map_name, floor_number). Rejects unknown/structural keys.
+    """
+    path = _project(root).set_map_properties(map, properties)
+    return {"written": str(path)}
+
+
+@mcp.tool()
 def scaffold_script(map: str, kind: str, label: str, text: str = "PLACEHOLDER TEXT",
                     root: Optional[str] = None) -> dict:
     """Append a boilerplate script (kind: 'sign' or 'npc') to a map's scripts.inc.
