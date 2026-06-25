@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from poryml.core.project import Project
+from porygon.core.project import Project
 
 _FALLBACK = Path.home() / "code/github.com/GregTheGreek/pokeemerald"
 

@@ -2,8 +2,8 @@
 
 import pytest
 
-from poryml.core.attributes import MetatileAttr, decode_attributes, encode_attributes
-from poryml.core.blockdata import Block, Blockdata, decode_blocks, encode_blocks
+from porygon.core.attributes import MetatileAttr, decode_attributes, encode_attributes
+from porygon.core.blockdata import Block, Blockdata, decode_blocks, encode_blocks
 
 
 # --- unit: the codec is bijective over the full 16-bit space ------------

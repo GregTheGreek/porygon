@@ -1,5 +1,5 @@
 {
-  "name": "poryml",
+  "name": "porygon",
   "description": "AI-augmented pokeemerald ROM hacking: binary map I/O, build/debug loop, event scripting, and image-to-map. Augments Porymap and the decomp workflow; not autonomous.",
   "version": "0.1.0",
   "author": {
@@ -9,7 +9,7 @@
   "skills": "./skills",
   "agents": "./agents",
   "mcpServers": {
-    "poryml": {
+    "porygon": {
       "command": "uv",
       "args": [
         "run",
@@ -17,7 +17,7 @@
         "${CLAUDE_PLUGIN_ROOT}/mcp",
         "python",
         "-m",
-        "poryml.server"
+        "porygon.server"
       ]
     }
   }

@@ -1,8 +1,8 @@
 # pokeemerald project guide (for Claude)
 
-This is a **pokeemerald** decompilation project (pret). The `poryml` toolkit is
+This is a **pokeemerald** decompilation project (pret). The `porygon` toolkit is
 installed to augment map editing, scripting, and debugging. Keep a human in the
-loop for design decisions; use the deterministic `mcp__poryml__*` tools for the
+loop for design decisions; use the deterministic `mcp__porygon__*` tools for the
 binary/format work.
 
 ## Build
@@ -18,7 +18,7 @@ binary/format work.
 - `data/layouts/layouts.json` - layout table: id, name, width, height, tilesets, and paths to `map.bin`/`border.bin`.
 - `data/layouts/<Layout>/map.bin` - **binary** blockdata. Each block is 16-bit LE:
   metatile id (bits 0-9), collision (10-11), elevation (12-15). Do **not** hand-edit;
-  use `mcp__poryml__read_blockdata` / `write_blockdata`.
+  use `mcp__porygon__read_blockdata` / `write_blockdata`.
 - `data/layouts/<Layout>/border.bin` - the map border (emerald: 2x2 blocks = 8 bytes).
 - `data/maps/<Map>/map.json` - map metadata + object/warp/coord/bg events (script refs).
 - `data/maps/<Map>/scripts.inc` - event scripts (or `scripts.pory` if using Poryscript).
@@ -32,10 +32,10 @@ binary/format work.
 - Edit C in `src/`, headers in `include/`. Constants live in `include/constants/`.
 - After editing data or code, rebuild and verify it compiles before claiming done.
 - Prefer Poryscript (`.pory`) for new event scripts where the project uses it.
-- For map edits: use `poryml` to read/write `map.bin`, then have the human review in
+- For map edits: use `porygon` to read/write `map.bin`, then have the human review in
   Porymap (the toolkit can drive a live preview via Porymap's custom-scripts bridge).
 
-## poryml tools (MCP)
+## porygon tools (MCP)
 
 `project_info`, `list_maps`, `list_layouts`, `get_layout`, `read_map`,
 `read_blockdata` (set `include_grid=true` for per-tile data), `write_blockdata`,

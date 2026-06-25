@@ -1,4 +1,4 @@
-# poryml
+# Porygon
 
 Gold-standard tooling for **AI-augmented** pokeemerald decomp ROM hacking. It
 makes Claude a strong copilot for the workflows that matter - **debugging**,
@@ -8,7 +8,7 @@ human in the loop. It is not an autonomous game builder.
 The value is in the things an LLM can't do reliably by hand:
 
 - **Binary blockdata I/O** - `map.bin` / `border.bin` / `metatile_attributes.bin`
-  are packed 16-bit formats. poryml reads and writes them exactly (byte-identical
+  are packed 16-bit formats. porygon reads and writes them exactly (byte-identical
   round-trip, verified against the full upstream layout set).
 - **Image -> map** (phased) - palette quantization, tile dedup, metatile assembly,
   collision suggestions; human reviews in Porymap.
@@ -41,7 +41,7 @@ pillars follow (see the plan).
 ```bash
 cd mcp && uv sync
 # point Claude Code at the plugin, then from a pokeemerald checkout:
-uv run poryml info
+uv run porygon info
 ```
 
 This is an unofficial community tool; it is not affiliated with or endorsed by

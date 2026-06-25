@@ -1,6 +1,6 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
-  "name": "poryml",
+  "name": "porygon",
   "metadata": {
     "description": "AI-augmented tooling for pokeemerald decomp ROM hacking and Porymap."
   },
@@ -9,7 +9,7 @@
   },
   "plugins": [
     {
-      "name": "poryml",
+      "name": "porygon",
       "description": "Binary map I/O, build/debug loop, event scripting, and image-to-map for pokeemerald. Augments the workflow; keeps a human in the loop.",
       "version": "0.1.0",
       "source": "./",

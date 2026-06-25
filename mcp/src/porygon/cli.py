@@ -1,10 +1,10 @@
-"""`poryml` CLI: thin wrapper over poryml.core that emits JSON.
+"""`porygon` CLI: thin wrapper over porygon.core that emits JSON.
 
 Usable standalone (and in tests) without any MCP/Claude involvement, e.g.:
 
-    poryml --root ~/code/.../pokeemerald info
-    poryml list-layouts
-    poryml read-blockdata LAYOUT_PETALBURG_CITY --grid
+    porygon --root ~/code/.../pokeemerald info
+    porygon list-layouts
+    porygon read-blockdata LAYOUT_PETALBURG_CITY --grid
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ import json
 import sys
 from pathlib import Path
 
-from poryml.core.project import Project, ProjectError
+from porygon.core.project import Project, ProjectError
 
 
 def _project(args) -> Project:
@@ -67,7 +67,7 @@ def cmd_read_attributes(args) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="poryml", description="pokeemerald deterministic primitives")
+    p = argparse.ArgumentParser(prog="porygon", description="pokeemerald deterministic primitives")
     p.add_argument("--root", help="project root (default: auto-detect from cwd)")
     sub = p.add_subparsers(dest="command", required=True)
 

@@ -10,8 +10,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from poryml.core.attributes import MetatileAttr, decode_attributes, encode_attributes
-from poryml.core.blockdata import Blockdata, decode_blocks, encode_blocks
+from porygon.core.attributes import MetatileAttr, decode_attributes, encode_attributes
+from porygon.core.blockdata import Blockdata, decode_blocks, encode_blocks
 
 
 class ProjectError(Exception):
