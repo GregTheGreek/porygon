@@ -1,4 +1,10 @@
-# Porygon
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)"  srcset="assets/porygon-lockup-dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="assets/porygon-lockup-light.png">
+    <img alt="Porygon" src="assets/porygon-lockup-light.png" width="320">
+  </picture>
+</p>
 
 Gold-standard tooling for **AI-augmented** pokeemerald decomp ROM hacking. It
 makes Claude a strong copilot for the workflows that matter - **debugging**,
