@@ -176,22 +176,47 @@ class Project:
         return self._artifact("pokeemerald_modern.gba", "pokeemerald.gba")
 
     def debug_print_status(self) -> dict:
-        """Whether debug prints are compiled in (NDEBUG controls it in config.h)."""
-        config = self.root / "include" / "config.h"
-        if not config.exists():
-            return {"config_found": False, "debug_prints_enabled": False}
-        ndebug_defined = False
-        for line in config.read_text().splitlines():
-            s = line.strip()
-            if s.startswith("#define NDEBUG"):
-                ndebug_defined = True
-                break
-        return {
-            "config_found": True,
-            "ndebug_defined": ndebug_defined,
-            # mgba_printf etc. emit output only when NDEBUG is NOT defined.
-            "debug_prints_enabled": not ndebug_defined,
-        }
+        """Report the project's debug configuration, vanilla- and expansion-aware.
+
+        Vanilla pokeemerald: ``include/config.h`` with ``#define NDEBUG`` gating
+        mgba_printf output. pokeemerald-expansion: an ``include/config/`` directory
+        (``debug.h`` with ``DEBUG_OVERWORLD_MENU`` etc.) and no single NDEBUG flag.
+        """
+        vanilla = self.root / "include" / "config.h"
+        expansion_dir = self.root / "include" / "config"
+
+        if vanilla.exists():
+            ndebug_defined = any(
+                line.strip().startswith("#define NDEBUG")
+                for line in vanilla.read_text().splitlines()
+            )
+            return {
+                "config_found": True,
+                "variant": "vanilla",
+                "ndebug_defined": ndebug_defined,
+                # mgba_printf etc. emit output only when NDEBUG is NOT defined.
+                "debug_prints_enabled": not ndebug_defined,
+            }
+
+        if expansion_dir.is_dir():
+            debug_h = expansion_dir / "debug.h"
+            menu = None
+            if debug_h.exists():
+                for line in debug_h.read_text().splitlines():
+                    s = line.strip()
+                    if s.startswith("#define DEBUG_OVERWORLD_MENU"):
+                        menu = s.split(None, 2)[2].split("//")[0].strip() if len(s.split(None, 2)) > 2 else None
+                        break
+            return {
+                "config_found": True,
+                "variant": "expansion",
+                "debug_overworld_menu": menu,
+                # Expansion has no single NDEBUG flag; mgba_printf status isn't
+                # derivable from one constant, so report it as unknown.
+                "debug_prints_enabled": None,
+            }
+
+        return {"config_found": False, "variant": "unknown", "debug_prints_enabled": None}
 
     # --- summary ---------------------------------------------------------
     def info(self) -> dict:

@@ -30,7 +30,9 @@ def _resolver(root: Optional[str] = None) -> SymbolResolver:
     elf = project.elf_path()
     if elf is None:
         raise FileNotFoundError(
-            "no built ELF found (pokeemerald_modern.elf / pokeemerald.elf). Build first."
+            f"no built ELF in {project.root} (looked for pokeemerald_modern.elf / "
+            f"pokeemerald.elf). Build the project first (run the `build` tool or your "
+            f"own build) - symbol/address resolution reads the compiled ELF."
         )
     return SymbolResolver(elf)
 
