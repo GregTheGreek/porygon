@@ -36,8 +36,9 @@ templates/        CLAUDE.md to drop into a pokeemerald checkout
 - **Phase 1 (build/debug loop)** - toolchain-agnostic `build`, compiler-error parsing, and symbol/crash-address resolution (function names from the symbol table; source `file:line` via DWARF when built with `DINFO=1`), plus a thin mGBA launch/GDB helper. `debug-loop` skill + `build-doctor` agent.
 - **Phase 2 (event scripting)** - map.json ↔ scripts.inc cross-ref validation (dangling labels, undefined constants), structured event editing (add/remove NPCs/signs/triggers), `.inc` scaffolding, macro-vocabulary lookup, and detected-optional Poryscript compile. Adaptive to hand-written `.inc` or Poryscript. `event-scripting` skill + `script-doctor` agent.
 - **Phase 3 (maps from images)** - `image_to_map`: porygon dedups 16×16 cells → metatiles + placement, **Porytiles** compiles the tileset, and a new tileset + layout are written, reviewable in Porymap (with a collision-overlay bridge script). Heuristic collision the human confirms; fork-aware (8 vs 12 tiles/metatile). `map-from-image` skill + `map-architect` agent. Needs `brew install grunt-lucas/porytiles`. Note: viewable in Porymap immediately; building into the ROM needs the new tileset registered in C (not automated).
+- **Phase 4 (map wiring)** - the navigation plumbing that ties maps together: `add_warp` (doors/exits, validating the destination map exists and `dest_warp_id` indexes a real warp), `get_connections` / `edit_connection` (stitch N/S/E/W/dive/emerge neighbours, with offset and dest-map validation), `set_map_properties` (weather, music, map_type, battle_scene, and flags - rejecting unknown/structural keys), and `add_bg_event` for the full bg vocabulary (signs, hidden items, secret-base entrances; fork-custom types pass through). All are minimal-diff `map.json` edits with round-trip tests.
 
-That completes the three workflows the toolkit set out to augment: **debug, scripting, maps**.
+That completes the workflows the toolkit set out to augment: **debug, scripting, maps**, and the **map wiring** that connects them.
 
 ## Quickstart
 
