@@ -1,0 +1,20 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "poryml",
+  "metadata": {
+    "description": "AI-augmented tooling for pokeemerald decomp ROM hacking and Porymap."
+  },
+  "owner": {
+    "name": "Gregory Markou"
+  },
+  "plugins": [
+    {
+      "name": "poryml",
+      "description": "Binary map I/O, build/debug loop, event scripting, and image-to-map for pokeemerald. Augments the workflow; keeps a human in the loop.",
+      "version": "0.1.0",
+      "source": "./",
+      "category": "game-dev",
+      "tags": ["pokeemerald", "porymap", "rom-hacking", "gba", "decomp"]
+    }
+  ]
+}
