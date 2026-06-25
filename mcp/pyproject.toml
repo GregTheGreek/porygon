@@ -5,25 +5,28 @@ description = "Deterministic primitives for AI-augmented pokeemerald ROM hacking
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "mcp>=1.2.0",
+    "mcp==1.28.0",
 ]
 
 [project.optional-dependencies]
 # Pulled in for the image pipeline (Phase 3+). Kept optional so the foundation
 # (binary I/O + project parsing) installs with no native/image deps.
 imaging = [
-    "Pillow>=10.0.0",
-    "numpy>=1.24.0",
+    "Pillow==12.2.0",
+    # numpy resolves to different exact versions per Python (2.2.6/2.4.6/2.5.0);
+    # a floor keeps it installable across requires-python, and uv.lock pins the
+    # exact version chosen for each interpreter.
+    "numpy>=2.2.6",
 ]
 dev = [
-    "pytest>=8.0.0",
+    "pytest==9.1.1",
 ]
 
 [project.scripts]
 porygon = "porygon.cli:main"
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling==1.30.1"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
