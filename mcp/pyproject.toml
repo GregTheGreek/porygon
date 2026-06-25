@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "mcp==1.28.0",
+    "pyelftools==0.33",
 ]
 
 [project.optional-dependencies]

@@ -37,7 +37,12 @@ binary/format work.
 
 ## porygon tools (MCP)
 
-`project_info`, `list_maps`, `list_layouts`, `get_layout`, `read_map`,
+Maps/data: `project_info`, `list_maps`, `list_layouts`, `get_layout`, `read_map`,
 `read_blockdata` (set `include_grid=true` for per-tile data), `write_blockdata`,
-`read_metatile_attributes`. Build/debug, scripting, and image-to-map tools are
-added in later phases.
+`read_metatile_attributes`.
+
+Build/debug (use the `debug-loop` skill): `build` (runs `make modern`; override
+with `$PORYGON_BUILD_CMD`), `parse_build_log`, `resolve_address` (address ->
+function + file:line), `lookup_symbol`, `emu_launch_command`. Note: function
+names come from the symbol table, but source `file:line` resolution needs a
+`DINFO=1` build (DWARF). Scripting and image-to-map tools come in later phases.

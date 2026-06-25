@@ -32,9 +32,10 @@ templates/        CLAUDE.md to drop into a pokeemerald checkout
 
 ## Status
 
-Phase 0 (foundation) implemented: binary codecs, project parsing, MCP server +
-CLI, and a passing round-trip test suite. Build/debug, scripting, and image-to-map
-pillars follow (see the plan).
+- **Phase 0 (foundation)** - binary codecs, project parsing, MCP server + CLI, byte-identical round-trip tests.
+- **Phase 1 (build/debug loop)** - toolchain-agnostic `build`, compiler-error parsing, and symbol/crash-address resolution (function names from the symbol table; source `file:line` via DWARF when built with `DINFO=1`), plus a thin mGBA launch/GDB helper. `debug-loop` skill + `build-doctor` agent.
+
+Scripting (Phase 2) and image-to-map (Phases 3-4) follow (see the plan).
 
 ## Quickstart
 

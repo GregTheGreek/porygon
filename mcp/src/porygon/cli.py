@@ -14,6 +14,7 @@ import json
 import sys
 from pathlib import Path
 
+from porygon.core.diagnostics import SymbolError
 from porygon.core.project import Project, ProjectError
 
 
@@ -66,6 +67,53 @@ def cmd_read_attributes(args) -> int:
     return _emit({"path": args.path, "count": len(attrs), "attributes": [a.to_dict() for a in attrs]})
 
 
+def _resolver(args):
+    from porygon.core.diagnostics import SymbolResolver
+
+    elf = _project(args).elf_path()
+    if elf is None:
+        raise ProjectError("no built ELF found (pokeemerald_modern.elf / pokeemerald.elf)")
+    return SymbolResolver(elf)
+
+
+def cmd_build(args) -> int:
+    from porygon.core import build as buildmod
+
+    return _emit(buildmod.build(_project(args).root, target=args.target, dinfo=not args.no_dinfo))
+
+
+def cmd_parse_log(args) -> int:
+    from porygon.core.diagnostics import parse_build_errors
+
+    text = sys.stdin.read() if args.file == "-" else open(args.file).read()
+    return _emit(parse_build_errors(text))
+
+
+def cmd_resolve_address(args) -> int:
+    return _emit(_resolver(args).resolve_address(int(str(args.address), 0)))
+
+
+def cmd_lookup_symbol(args) -> int:
+    addr = _resolver(args).lookup_symbol(args.name)
+    return _emit({"name": args.name, "address": addr, "hex": f"0x{addr:08x}"})
+
+
+def cmd_emu_command(args) -> int:
+    from porygon.core import emu as emumod
+
+    project = _project(args)
+    rom = project.rom_path()
+    if rom is None:
+        raise ProjectError("no built ROM found (pokeemerald_modern.gba / pokeemerald.gba)")
+    return _emit(
+        {
+            "command": emumod.launch_command(rom, gdb=args.gdb),
+            "gdb_hint": emumod.gdb_connect_hint(project.elf_path()) if args.gdb else None,
+            "debug_prints": project.debug_print_status(),
+        }
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="porygon", description="pokeemerald deterministic primitives")
     p.add_argument("--root", help="project root (default: auto-detect from cwd)")
@@ -92,6 +140,27 @@ def build_parser() -> argparse.ArgumentParser:
     ra.add_argument("path", help="project-relative path to metatile_attributes.bin")
     ra.set_defaults(func=cmd_read_attributes)
 
+    bd = sub.add_parser("build", help="build the ROM and report diagnostics")
+    bd.add_argument("--target", default="modern", help="make target (default: modern)")
+    bd.add_argument("--no-dinfo", action="store_true", help="omit DINFO=1 (debug symbols)")
+    bd.set_defaults(func=cmd_build)
+
+    pl = sub.add_parser("parse-log", help="parse a build log into structured diagnostics")
+    pl.add_argument("file", nargs="?", default="-", help="log file, or - for stdin (default)")
+    pl.set_defaults(func=cmd_parse_log)
+
+    ad = sub.add_parser("resolve-address", help="address -> function + file:line (from built ELF)")
+    ad.add_argument("address", help="e.g. 0x0806b424")
+    ad.set_defaults(func=cmd_resolve_address)
+
+    ls = sub.add_parser("lookup-symbol", help="symbol name -> address (from built ELF)")
+    ls.add_argument("name")
+    ls.set_defaults(func=cmd_lookup_symbol)
+
+    ec = sub.add_parser("emu-command", help="print the mGBA launch command for the ROM")
+    ec.add_argument("--gdb", action="store_true", help="start mGBA's GDB stub (:2345)")
+    ec.set_defaults(func=cmd_emu_command)
+
     return p
 
 
@@ -99,7 +168,7 @@ def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
     try:
         return args.func(args)
-    except ProjectError as e:
+    except (ProjectError, SymbolError, FileNotFoundError, ValueError, OSError) as e:
         json.dump({"error": str(e)}, sys.stderr, indent=2)
         sys.stderr.write("\n")
         return 2
