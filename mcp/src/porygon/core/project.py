@@ -143,12 +143,72 @@ class Project:
             maps.append({"id": d.get("id"), "name": d.get("name"), "layout": d.get("layout")})
         return maps
 
-    def read_map(self, map_id_or_name: str) -> dict:
+    def _map_dir(self, map_id_or_name: str) -> Path:
         for map_json in self._maps_dir().glob("*/map.json"):
             d = json.loads(map_json.read_text())
             if d.get("id") == map_id_or_name or d.get("name") == map_id_or_name:
-                return d
+                return map_json.parent
         raise ProjectError(f"map {map_id_or_name!r} not found")
+
+    def read_map(self, map_id_or_name: str) -> dict:
+        return json.loads((self._map_dir(map_id_or_name) / "map.json").read_text())
+
+    def map_scripts_path(self, map_id_or_name: str):
+        """Path to a map's scripts.inc, honoring shared_scripts_map."""
+        d = self.read_map(map_id_or_name)
+        shared = d.get("shared_scripts_map")
+        map_dir = self._map_dir(shared) if shared else self._map_dir(map_id_or_name)
+        return map_dir / "scripts.inc"
+
+    def read_map_events(self, map_id_or_name: str) -> dict:
+        d = self.read_map(map_id_or_name)
+        return {k: d.get(k) or [] for k in ("object_events", "warp_events", "coord_events", "bg_events")}
+
+    def _write_map(self, map_id_or_name: str, data: dict) -> Path:
+        path = self._map_dir(map_id_or_name) / "map.json"
+        # Match the repo style: 2-space indent + trailing newline, key order preserved.
+        path.write_text(json.dumps(data, indent=2) + "\n")
+        return path
+
+    # Required fields per event kind (mirrors the mapjson schema).
+    _EVENT_REQUIRED = {
+        "object_events": ["graphics_id", "x", "y", "elevation", "movement_type",
+                          "movement_range_x", "movement_range_y", "trainer_type",
+                          "trainer_sight_or_berry_tree_id", "script", "flag"],
+        "bg_events": ["type", "x", "y", "elevation"],
+        "coord_events": ["type", "x", "y", "elevation", "var", "var_value", "script"],
+        "warp_events": ["x", "y", "elevation", "dest_map", "dest_warp_id"],
+    }
+
+    def add_event(self, map_id_or_name: str, kind: str, event: dict) -> Path:
+        """Append an event to a map. kind in object_events/bg_events/coord_events/warp_events."""
+        if kind not in self._EVENT_REQUIRED:
+            raise ProjectError(f"unknown event kind {kind!r}")
+        missing = [f for f in self._EVENT_REQUIRED[kind] if f not in event]
+        if missing:
+            raise ProjectError(f"{kind} missing required fields: {', '.join(missing)}")
+        d = self.read_map(map_id_or_name)
+        d.setdefault(kind, [])
+        if d[kind] is None:
+            d[kind] = []
+        d[kind].append(event)
+        return self._write_map(map_id_or_name, d)
+
+    def remove_event(self, map_id_or_name: str, kind: str, index: int) -> Path:
+        d = self.read_map(map_id_or_name)
+        arr = d.get(kind) or []
+        if not (0 <= index < len(arr)):
+            raise ProjectError(f"{kind} index {index} out of range (0..{len(arr) - 1})")
+        del arr[index]
+        return self._write_map(map_id_or_name, d)
+
+    def append_script_inc(self, map_id_or_name: str, snippet: str) -> Path:
+        """Append a scaffolded script block to a map's scripts.inc (creates if absent)."""
+        path = self.map_scripts_path(map_id_or_name)
+        existing = path.read_text() if path.exists() else ""
+        sep = "" if existing.endswith("\n\n") or not existing else ("\n" if existing.endswith("\n") else "\n\n")
+        path.write_text(existing + sep + snippet.rstrip() + "\n")
+        return path
 
     # --- tilesets --------------------------------------------------------
     def read_metatile_attributes(self, attributes_path: str) -> list[MetatileAttr]:

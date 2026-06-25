@@ -18,6 +18,7 @@ from mcp.server.fastmcp import FastMCP
 
 from porygon.core import build as buildmod
 from porygon.core import emu as emumod
+from porygon.core import scripting as scriptmod
 from porygon.core.blockdata import Blockdata
 from porygon.core.diagnostics import SymbolResolver, parse_build_errors
 from porygon.core.project import Project
@@ -179,6 +180,92 @@ def emu_launch_command(gdb: bool = False, root: Optional[str] = None) -> dict:
         "gdb_hint": emumod.gdb_connect_hint(elf) if (gdb and elf) else None,
         "debug_prints": project.debug_print_status(),
     }
+
+
+@mcp.tool()
+def validate_scripts(map: str, root: Optional[str] = None) -> dict:
+    """Cross-check a map's events against its scripts.inc and the constants index.
+
+    Flags event `script:` labels not defined in scripts.inc (dangling), undefined
+    FLAG_/VAR_/ITEM_/gfx/movement constants (build failures), and unused labels.
+    Run this before building to catch silent-break typos.
+    """
+    return scriptmod.validate_map_scripts(_project(root), map)
+
+
+@mcp.tool()
+def list_macros(root: Optional[str] = None) -> dict:
+    """List the project's event/movement script macros (parsed from its own asm/macros)."""
+    macros = scriptmod.load_macros(_project(root))
+    return {"count": len(macros), "names": sorted(macros)}
+
+
+@mcp.tool()
+def lookup_macro(name: str, root: Optional[str] = None) -> dict:
+    """Get a script macro's argument signature (name, required, default) by name."""
+    found = scriptmod.lookup_macro(_project(root), name)
+    if found is None:
+        return {"name": name, "found": False}
+    return {"found": True, **found}
+
+
+@mcp.tool()
+def read_map_events(map: str, root: Optional[str] = None) -> dict:
+    """Read a map's object/warp/coord/bg events."""
+    return _project(root).read_map_events(map)
+
+
+@mcp.tool()
+def add_object_event(map: str, event: dict, root: Optional[str] = None) -> dict:
+    """Append an object_event (NPC/item) to a map.json (validates required fields)."""
+    path = _project(root).add_event(map, "object_events", event)
+    return {"written": str(path)}
+
+
+@mcp.tool()
+def add_sign(map: str, event: dict, root: Optional[str] = None) -> dict:
+    """Append a bg_event (e.g. a sign) to a map.json (validates required fields)."""
+    path = _project(root).add_event(map, "bg_events", event)
+    return {"written": str(path)}
+
+
+@mcp.tool()
+def add_trigger(map: str, event: dict, root: Optional[str] = None) -> dict:
+    """Append a coord_event (trigger) to a map.json (validates required fields)."""
+    path = _project(root).add_event(map, "coord_events", event)
+    return {"written": str(path)}
+
+
+@mcp.tool()
+def remove_event(map: str, kind: str, index: int, root: Optional[str] = None) -> dict:
+    """Remove an event by kind (object_events/bg_events/coord_events/warp_events) and index."""
+    path = _project(root).remove_event(map, kind, index)
+    return {"written": str(path)}
+
+
+@mcp.tool()
+def scaffold_script(map: str, kind: str, label: str, text: str = "PLACEHOLDER TEXT",
+                    root: Optional[str] = None) -> dict:
+    """Append a boilerplate script (kind: 'sign' or 'npc') to a map's scripts.inc.
+
+    Returns the label to wire into a map event. Claude should then refine the
+    generated .inc (dialogue, logic) and validate_scripts to confirm.
+    """
+    snippet = scriptmod.scaffold_script(kind, label, text)
+    path = _project(root).append_script_inc(map, snippet)
+    return {"label": label, "written": str(path), "snippet": snippet}
+
+
+@mcp.tool()
+def poryscript_status(root: Optional[str] = None) -> dict:
+    """Report whether Poryscript is available and whether the project uses it."""
+    return scriptmod.poryscript_status(_project(root))
+
+
+@mcp.tool()
+def compile_poryscript(pory_path: str, inc_path: str, root: Optional[str] = None) -> dict:
+    """Compile a .pory to a .inc (only if poryscript is available for this project)."""
+    return scriptmod.compile_poryscript(_project(root), pory_path, inc_path)
 
 
 def main() -> None:
