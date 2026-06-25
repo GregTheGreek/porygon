@@ -51,5 +51,10 @@ Event scripting (use the `event-scripting` skill): `validate_scripts` (map ↔
 scripts.inc labels + constant cross-refs), `read_map_events`, `add_object_event`/
 `add_sign`/`add_trigger`/`remove_event`, `scaffold_script`, `list_macros`/
 `lookup_macro`, `poryscript_status`/`compile_poryscript`. Scripts are referenced
-by bare global label from map.json events; validate before building. Image-to-map
-tools come in a later phase.
+by bare global label from map.json events; validate before building.
+
+Maps from images (use the `map-from-image` skill): `porytiles_status`,
+`validate_image`, `image_to_map` (image -> new tileset + layout, reviewable in
+Porymap). Requires Porytiles (`brew install grunt-lucas/porytiles`). The
+generated tileset is viewable in Porymap immediately but needs C registration to
+build into the ROM. Review collision with `porymap-scripts/porygon-collision-overlay.js`.
