@@ -9,8 +9,7 @@ build/
 .pytest_cache/
 .ruff_cache/
 
-# uv
-uv.lock
+# uv: lockfile IS committed (it pins the full transitive dependency tree).
 
 # OS
 .DS_Store
