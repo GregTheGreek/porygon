@@ -251,6 +251,152 @@ class Project:
         del arr[index]
         return self._write_map(map_id_or_name, d)
 
+    # --- map wiring: warps, connections, properties, bg events -----------
+
+    # Connection directions pokeemerald understands.
+    _CONNECTION_DIRECTIONS = {"up", "down", "left", "right", "dive", "emerge"}
+
+    # Top-level scalar metadata safe to edit. Structural keys (id, name,
+    # layout) are intentionally excluded - changing those breaks references.
+    _MAP_PROPERTY_KEYS = {
+        "music", "weather", "map_type", "battle_scene", "region_map_section",
+        "requires_flash", "allow_cycling", "allow_escaping", "allow_running",
+        "show_map_name", "floor_number",
+    }
+
+    # Per-bg-type required fields, beyond the shared type/x/y/elevation. An
+    # unknown type (fork-custom) is allowed through with only the shared fields.
+    _BG_REQUIRED = {
+        "sign": ["player_facing_dir", "script"],
+        "hidden_item": ["item", "flag"],
+        "secret_base": ["secret_base_id"],
+    }
+
+    def map_exists(self, map_id_or_name: str) -> bool:
+        try:
+            self._map_dir(map_id_or_name)
+            return True
+        except ProjectError:
+            return False
+
+    def add_warp(self, map_id_or_name: str, event: dict) -> Path:
+        """Append a warp_event, validating dest_map exists and dest_warp_id is in range.
+
+        The destination warp_id must index an existing warp on dest_map (a warp
+        pointing at a nonexistent warp is a common, hard-to-debug mistake).
+        """
+        missing = [f for f in self._EVENT_REQUIRED["warp_events"] if f not in event]
+        if missing:
+            raise ProjectError(f"warp_events missing required fields: {', '.join(missing)}")
+        dest = event["dest_map"]
+        if not self.map_exists(dest):
+            raise ProjectError(f"warp dest_map {dest!r} not found")
+        dest_warps = self.read_map(dest).get("warp_events") or []
+        try:
+            idx = int(str(event["dest_warp_id"]), 0)
+        except (ValueError, TypeError):
+            idx = None
+        if idx is not None and dest_warps and not (0 <= idx < len(dest_warps)):
+            raise ProjectError(
+                f"dest_warp_id {event['dest_warp_id']} out of range for {dest} "
+                f"(has {len(dest_warps)} warps: valid 0..{len(dest_warps) - 1})"
+            )
+        return self.add_event(map_id_or_name, "warp_events", event)
+
+    def add_bg_event(self, map_id_or_name: str, event: dict) -> Path:
+        """Append a bg_event (sign / hidden_item / secret_base / fork-custom).
+
+        Validates the fields each known type needs; unknown types pass through
+        with only the shared type/x/y/elevation requirement.
+        """
+        bg_type = event.get("type")
+        if not bg_type:
+            raise ProjectError("bg_event requires a 'type' (sign/hidden_item/secret_base/...)")
+        required = ["type", "x", "y", "elevation"] + self._BG_REQUIRED.get(bg_type, [])
+        missing = [f for f in required if f not in event]
+        if missing:
+            raise ProjectError(f"bg_event {bg_type!r} missing required fields: {', '.join(missing)}")
+        return self.add_event(map_id_or_name, "bg_events", event)
+
+    def read_connections(self, map_id_or_name: str) -> list[dict]:
+        return self.read_map(map_id_or_name).get("connections") or []
+
+    def _check_direction(self, direction: str) -> None:
+        if direction not in self._CONNECTION_DIRECTIONS:
+            raise ProjectError(
+                f"unknown connection direction {direction!r} "
+                f"(use {', '.join(sorted(self._CONNECTION_DIRECTIONS))})"
+            )
+
+    def _find_connection(self, conns: list[dict], direction: Optional[str],
+                         index: Optional[int]) -> int:
+        if index is not None:
+            if not (0 <= index < len(conns)):
+                raise ProjectError(f"connection index {index} out of range (0..{len(conns) - 1})")
+            return index
+        if direction is not None:
+            matches = [i for i, c in enumerate(conns) if c.get("direction") == direction]
+            if not matches:
+                raise ProjectError(f"no connection in direction {direction!r}")
+            if len(matches) > 1:
+                raise ProjectError(
+                    f"multiple connections in direction {direction!r}; address by index instead"
+                )
+            return matches[0]
+        raise ProjectError("specify a direction or an index to locate the connection")
+
+    def edit_connection(self, map_id_or_name: str, action: str,
+                        direction: Optional[str] = None, offset: Optional[int] = None,
+                        dest_map: Optional[str] = None, index: Optional[int] = None) -> Path:
+        """Add, update, or remove a directional map connection.
+
+        - ``add``: requires direction, offset, dest_map.
+        - ``update``: locate by direction (or index) and change offset and/or dest_map.
+        - ``remove``: locate by direction (or index) and delete it.
+        """
+        d = self.read_map(map_id_or_name)
+        conns = d.get("connections") or []
+        if action == "add":
+            if direction is None or offset is None or dest_map is None:
+                raise ProjectError("add requires direction, offset, and dest_map")
+            self._check_direction(direction)
+            if not self.map_exists(dest_map):
+                raise ProjectError(f"connection dest map {dest_map!r} not found")
+            conns.append({"map": dest_map, "offset": int(offset), "direction": direction})
+        elif action == "update":
+            i = self._find_connection(conns, direction, index)
+            if dest_map is not None:
+                if not self.map_exists(dest_map):
+                    raise ProjectError(f"connection dest map {dest_map!r} not found")
+                conns[i]["map"] = dest_map
+            if offset is not None:
+                conns[i]["offset"] = int(offset)
+        elif action == "remove":
+            i = self._find_connection(conns, direction, index)
+            del conns[i]
+        else:
+            raise ProjectError(f"unknown action {action!r} (use add/update/remove)")
+        d["connections"] = conns
+        return self._write_map(map_id_or_name, d)
+
+    def set_map_properties(self, map_id_or_name: str, props: dict) -> Path:
+        """Update top-level map metadata (weather, music, flags, ...).
+
+        Rejects unknown/structural keys so a typo can't silently add a dead field.
+        """
+        if not props:
+            raise ProjectError("no properties given")
+        unknown = [k for k in props if k not in self._MAP_PROPERTY_KEYS]
+        if unknown:
+            raise ProjectError(
+                f"unknown/uneditable map properties: {', '.join(sorted(unknown))} "
+                f"(editable: {', '.join(sorted(self._MAP_PROPERTY_KEYS))})"
+            )
+        d = self.read_map(map_id_or_name)
+        for k, v in props.items():
+            d[k] = v
+        return self._write_map(map_id_or_name, d)
+
     def append_script_inc(self, map_id_or_name: str, snippet: str) -> Path:
         """Append a scaffolded script block to a map's scripts.inc (creates if absent)."""
         path = self.map_scripts_path(map_id_or_name)
