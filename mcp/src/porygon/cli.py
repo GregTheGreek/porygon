@@ -119,6 +119,53 @@ def cmd_emu_command(args) -> int:
     )
 
 
+def cmd_validate_scripts(args) -> int:
+    from porygon.core import scripting
+
+    return _emit(scripting.validate_map_scripts(_project(args), args.map))
+
+
+def cmd_list_macros(args) -> int:
+    from porygon.core import scripting
+
+    m = scripting.load_macros(_project(args))
+    return _emit({"count": len(m), "names": sorted(m)})
+
+
+def cmd_lookup_macro(args) -> int:
+    from porygon.core import scripting
+
+    found = scripting.lookup_macro(_project(args), args.name)
+    return _emit({"name": args.name, "found": False} if found is None else {"found": True, **found})
+
+
+def cmd_read_events(args) -> int:
+    return _emit(_project(args).read_map_events(args.map))
+
+
+def cmd_scaffold_script(args) -> int:
+    from porygon.core import scripting
+
+    snippet = scripting.scaffold_script(args.kind, args.label, args.text)
+    path = _project(args).append_script_inc(args.map, snippet)
+    return _emit({"label": args.label, "written": str(path), "snippet": snippet})
+
+
+def cmd_poryscript_status(args) -> int:
+    from porygon.core import scripting
+
+    return _emit(scripting.poryscript_status(_project(args)))
+
+
+def cmd_add_event(args) -> int:
+    event = json.loads(args.json)
+    return _emit({"written": str(_project(args).add_event(args.map, args.kind, event))})
+
+
+def cmd_remove_event(args) -> int:
+    return _emit({"written": str(_project(args).remove_event(args.map, args.kind, args.index))})
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="porygon", description="pokeemerald deterministic primitives")
     p.add_argument("--root", help="project root (default: auto-detect from cwd)")
@@ -165,6 +212,43 @@ def build_parser() -> argparse.ArgumentParser:
     ec = sub.add_parser("emu-command", help="print the mGBA launch command for the ROM")
     ec.add_argument("--gdb", action="store_true", help="start mGBA's GDB stub (:2345)")
     ec.set_defaults(func=cmd_emu_command)
+
+    vs = sub.add_parser("validate-scripts", help="cross-check a map's events vs scripts.inc + constants")
+    vs.add_argument("map")
+    vs.set_defaults(func=cmd_validate_scripts)
+
+    sub.add_parser("list-macros", help="list event/movement script macros").set_defaults(func=cmd_list_macros)
+
+    lm = sub.add_parser("lookup-macro", help="show a script macro's argument signature")
+    lm.add_argument("name")
+    lm.set_defaults(func=cmd_lookup_macro)
+
+    re_ = sub.add_parser("read-events", help="read a map's object/warp/coord/bg events")
+    re_.add_argument("map")
+    re_.set_defaults(func=cmd_read_events)
+
+    sc = sub.add_parser("scaffold-script", help="append a boilerplate script to a map's scripts.inc")
+    sc.add_argument("map")
+    sc.add_argument("kind", choices=["sign", "npc"])
+    sc.add_argument("label")
+    sc.add_argument("--text", default="PLACEHOLDER TEXT")
+    sc.set_defaults(func=cmd_scaffold_script)
+
+    sub.add_parser("poryscript-status", help="report Poryscript availability/usage").set_defaults(
+        func=cmd_poryscript_status
+    )
+
+    ae = sub.add_parser("add-event", help="append an event (JSON) to a map.json")
+    ae.add_argument("map")
+    ae.add_argument("kind", choices=["object_events", "bg_events", "coord_events", "warp_events"])
+    ae.add_argument("json", help="event object as JSON")
+    ae.set_defaults(func=cmd_add_event)
+
+    rme = sub.add_parser("remove-event", help="remove an event by kind + index")
+    rme.add_argument("map")
+    rme.add_argument("kind", choices=["object_events", "bg_events", "coord_events", "warp_events"])
+    rme.add_argument("index", type=int)
+    rme.set_defaults(func=cmd_remove_event)
 
     return p
 
