@@ -210,6 +210,34 @@ def _edge_key(n_land: bool, e_land: bool, s_land: bool, w_land: bool):
     return None
 
 
+def _unique_names(project, base: str) -> dict:
+    """Names for `base`, or the same with the lowest free `_NNNNN` suffix if its map/layout
+    already exist. Lets the same scene be re-composed without manual renaming. The suffix is
+    appended to the derived ids directly so it survives as e.g. MAP_IMAGE_ROUTE_A_00001
+    (camel/snake normalization would otherwise swallow the separator before digits).
+    """
+    names = names_for(base)
+
+    def taken(n: dict) -> bool:
+        if project.map_exists(n["map_id"]):
+            return True
+        return any(layout.id == n["layout_id"] for layout in project.list_layouts())
+
+    if not taken(names):
+        return names
+    i = 1
+    while True:
+        suf = f"_{i:05d}"
+        cand = dict(names)
+        cand["map_id"] = names["map_id"] + suf
+        cand["layout_id"] = names["layout_id"] + suf
+        cand["map_name"] = names["map_name"] + suf
+        cand["layout_name"] = f'{names["map_name"]}{suf}_Layout'
+        if not taken(cand):
+            return cand
+        i += 1
+
+
 def compose_map(project, spec: dict, preview: bool = True) -> dict:
     """Compose a walkable map from a MapSpec: terrain fill + stamps + reciprocal link.
 
@@ -322,8 +350,9 @@ def compose_map(project, spec: dict, preview: bool = True) -> dict:
     blocks = [grid[j][i] for j in range(H) for i in range(W)]
     bd = Blockdata(width=W, height=H, blocks=blocks)
 
-    # write layout + map (reuse Phase 5 plumbing)
-    names = names_for(spec["name"])
+    # write layout + map (reuse Phase 5 plumbing). Resolve a unique name so re-composing
+    # the same scene never collides: append an incremental _NNNNN suffix when taken.
+    names = _unique_names(project, spec["name"])
     entry = project.add_layout(
         names["layout_id"], names["layout_name"], W, H,
         primary_tileset=prim, secondary_tileset=sec,

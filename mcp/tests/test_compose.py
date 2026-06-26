@@ -189,6 +189,17 @@ def test_region_stamp_blits_verbatim_and_skips_autotile(proj):
     assert bd.get(4, 4).metatile_id == 525
 
 
+def test_compose_increments_name_on_collision(proj):
+    a = compose.compose_map(proj, _spec(name="DupTown"), preview=False)
+    b = compose.compose_map(proj, _spec(name="DupTown"), preview=False)
+    c = compose.compose_map(proj, _spec(name="DupTown"), preview=False)
+    assert a["map"] == "MAP_DUP_TOWN"
+    assert b["map"] == "MAP_DUP_TOWN_00001"
+    assert c["map"] == "MAP_DUP_TOWN_00002"
+    for m in ("MAP_DUP_TOWN", "MAP_DUP_TOWN_00001", "MAP_DUP_TOWN_00002"):
+        assert proj.map_exists(m)
+
+
 def test_compose_unknown_terrain_raises(proj):
     with pytest.raises(ComposeError, match="unknown terrain"):
         compose.compose_map(proj, _spec(base_terrain="lava"), preview=False)
