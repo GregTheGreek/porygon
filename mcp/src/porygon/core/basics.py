@@ -293,7 +293,10 @@ def generate_basics_tileset(project, force: bool = False) -> dict:
 
     out_dir = project.root / "data" / "tilesets" / "primary" / BASICS_FOLDER
     if out_dir.exists() and not force and (out_dir / "metatiles.bin").exists():
+        with Image.open(out_dir / "tiles.png") as im:
+            ntiles = (im.size[0] // 8) * (im.size[1] // 8)
         return {"folder": BASICS_FOLDER, "label": BASICS_PRIMARY, "metatiles": len(_VOCAB),
+                "num_tiles": ntiles, "palettes": len(list((out_dir / "palettes").glob("*.pal"))),
                 "path": str(out_dir), "regenerated": False}
     (out_dir / "palettes").mkdir(parents=True, exist_ok=True)
 
