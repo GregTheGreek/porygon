@@ -257,6 +257,28 @@ def basics_palette() -> dict:
     return pal
 
 
+# In-game metatile behaviors (encounters/surf), by MB_ name. Resolved against the project's
+# include/constants/metatile_behaviors.h at generate time (fork-safe). WALKABILITY is separate -
+# compose writes collision onto the Block; these only add semantics (grass encounters, surf).
+_BEHAVIOR = {
+    "tall_grass": "MB_TALL_GRASS",
+    **{f"water{s}": "MB_POND_WATER" for s in ("", "_n", "_s", "_w", "_e", "_nw", "_ne", "_sw", "_se")},
+}
+
+
+def _resolve_behaviors(project) -> list[int]:
+    """Per-metatile behavior value (parallel to _VOCAB) from the project's behavior enum."""
+    import re
+    header = project.root / "include" / "constants" / "metatile_behaviors.h"
+    val: dict[str, int] = {}
+    if header.exists():
+        m = re.search(r"enum\s*\{(.*?)\}", header.read_text(), re.S)
+        if m:
+            toks = [t.strip().split("=")[0].strip() for t in m.group(1).split(",")]
+            val = {t: i for i, t in enumerate(t for t in toks if t.startswith("MB_"))}
+    return [val.get(_BEHAVIOR.get(name, "MB_NORMAL"), 0) for name, *_ in _VOCAB]
+
+
 # --- tileset emission ---------------------------------------------------
 
 def _slice_tiles(meta):
@@ -308,19 +330,30 @@ def generate_basics_tileset(project, force: bool = False) -> dict:
         flat += list(rgb)
     flat += [0, 0, 0] * (256 - len(PALETTE))
     img.putpalette(flat)
-    img.save(out_dir / "tiles.png")
+    # bits=4 -> a 16-colour, 4-bit indexed PNG matching vanilla tiles.png (gbagfx-ready).
+    img.save(out_dir / "tiles.png", bits=4)
+    num_tiles = (sheet.shape[1] // 8) * (sheet.shape[0] // 8)
 
-    # palettes/00.pal (JASC)
-    lines = ["JASC-PAL", "0100", "16"] + [f"{r} {g} {b}" for r, g, b in PALETTE]
-    (out_dir / "palettes" / "00.pal").write_text("\n".join(lines) + "\n")
+    # 16 palettes (JASC). The build INCBINs all 16 and the game loads NUM_PALS_IN_PRIMARY
+    # from a primary; basics only uses slot 0, so fill every slot with the same palette.
+    pal_lines = ["JASC-PAL", "0100", "16"] + [f"{r} {g} {b}" for r, g, b in PALETTE]
+    pal_text = "\n".join(pal_lines) + "\n"
+    for i in range(16):
+        (out_dir / "palettes" / f"{i:02d}.pal").write_text(pal_text)
 
-    # metatiles.bin (8 u16 per metatile) + metatile_attributes.bin (NORMAL=0)
+    # metatiles.bin (8 u16 per metatile)
     mt = bytearray()
     for entries in meta_entries:
         for e in entries:
             mt += struct.pack("<H", e)
     (out_dir / "metatiles.bin").write_bytes(bytes(mt))
-    (out_dir / "metatile_attributes.bin").write_bytes(b"\x00\x00" * len(meta_entries))
+    # metatile_attributes.bin: u16 behavior per metatile (low byte), layer type 0.
+    behaviors = _resolve_behaviors(project)
+    attrs = bytearray()
+    for b in behaviors:
+        attrs += struct.pack("<H", b & 0xFF)
+    (out_dir / "metatile_attributes.bin").write_bytes(bytes(attrs))
 
     return {"folder": BASICS_FOLDER, "label": BASICS_PRIMARY, "metatiles": len(_VOCAB),
+            "num_tiles": num_tiles, "palettes": 16,
             "tiles": len(tiles), "path": str(out_dir), "regenerated": True}

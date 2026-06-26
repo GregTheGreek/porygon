@@ -41,7 +41,9 @@ Emerald tilesets have feature gaps (the pair with building stamps has **no bridg
 forces ugly fallbacks. For just **resembling** an arbitrary image, use the **porygon basics tileset** -
 a small set of unmistakable tiles where bridges/rocks/shorelines/walkability all just work:
 
-1. `init_basics_tileset` once (generates `gTileset_PorygonBasics`).
+1. `init_basics_tileset` once - generates `gTileset_PorygonBasics` AND registers it in C
+   (headers.h, graphics.c, metatiles.h, include/tilesets.h, graphics_file_rules.mk) so a normal
+   `make` builds the map and it's walkable in-game. Pass `register=False` for a render-only pass.
 2. Write a MapSpec with `"primary_tileset": "gTileset_PorygonBasics"`, `"secondary_tileset": "gTileset_Petalburg"`.
 3. Vocabulary (terrain classes): `grass`, `grass_light`, `tall_grass`, `sand`, `path`, `flower`,
    `bridge_h`, `bridge_v` (walkable), `water` (auto rocky shoreline), `tree`, `cliff`, `rock`, `sign`,
@@ -53,9 +55,9 @@ a small set of unmistakable tiles where bridges/rocks/shorelines/walkability all
 4. Review BOTH `match_preview.png` (resemblance) and `collision_preview.png` (red = blocked, clear =
    walkable) against the source - confirm bridges read as crossings and water/trees/rocks are blocked.
 
-Note: the basics map renders immediately; building it into the ROM is a tracked follow-up (the basics
-tileset isn't registered in C yet). For ROM-buildable maps with real emerald art, use the emerald
-tileset pairs below instead.
+Note: with `init_basics_tileset` (register=True) the basics tileset is C-registered, so the composed
+map both renders AND builds with a normal `make` (walkable in mGBA). For real emerald *art* (towns with
+building stamps), use the emerald tileset pairs below instead.
 
 ## Workflow
 

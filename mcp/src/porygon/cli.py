@@ -240,9 +240,15 @@ def cmd_compose_map(args) -> int:
 
 
 def cmd_init_basics(args) -> int:
-    from porygon.core import basics
+    from porygon.core import basics, tileset_register
 
-    return _emit(basics.generate_basics_tileset(_project(args), force=args.force))
+    proj = _project(args)
+    out = {"generate": basics.generate_basics_tileset(proj, force=args.force)}
+    if not args.no_register:
+        out["register"] = tileset_register.register_tileset(
+            proj, basics.BASICS_FOLDER, basics.BASICS_PRIMARY, is_secondary=False
+        )
+    return _emit(out)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -396,8 +402,10 @@ def build_parser() -> argparse.ArgumentParser:
     cm.set_defaults(func=cmd_compose_map)
 
     ib = sub.add_parser("init-basics",
-                        help="generate the porygon basics tileset (simple tiles for lowfi map renders)")
+                        help="generate + C-register the porygon basics tileset (buildable lowfi maps)")
     ib.add_argument("--force", action="store_true", help="regenerate even if it already exists")
+    ib.add_argument("--no-register", action="store_true",
+                    help="only write tileset data; skip editing the C/build files (render-only)")
     ib.set_defaults(func=cmd_init_basics)
 
     return p

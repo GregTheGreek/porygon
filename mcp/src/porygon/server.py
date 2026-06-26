@@ -445,18 +445,27 @@ def compose_map(spec: dict, root: Optional[str] = None) -> dict:
 
 
 @mcp.tool()
-def init_basics_tileset(root: Optional[str] = None, force: bool = False) -> dict:
-    """Generate the 'porygon basics' tileset (gTileset_PorygonBasics) into the project.
+def init_basics_tileset(root: Optional[str] = None, force: bool = False,
+                        register: bool = True) -> dict:
+    """Generate (and by default C-register) the 'porygon basics' tileset.
 
     A small, deliberately simple tileset (grass, water + rocky shoreline, bridge_h/bridge_v,
     forest, tall_grass, sand, path, rock, flower, sign, ledge, cliff, building) for rendering
     ANY image as a legible LOWFI map - it sidesteps emerald's per-tileset gaps (e.g. no bridges
-    in the building tileset). Run this once, then compose_map with primary_tileset
-    'gTileset_PorygonBasics'. Terrain classes incl. bridge_h/bridge_v (walkable) and rock.
+    in the building tileset). Run once, then compose_map with primary_tileset
+    'gTileset_PorygonBasics'. With register=True (default) it also edits the C/build files
+    (headers.h, graphics.c, metatiles.h, include/tilesets.h, graphics_file_rules.mk) so a normal
+    `make` builds the map into the ROM and it's walkable; register=False is render-only.
     """
-    from porygon.core import basics
+    from porygon.core import basics, tileset_register
 
-    return basics.generate_basics_tileset(_project(root), force=force)
+    proj = _project(root)
+    out = {"generate": basics.generate_basics_tileset(proj, force=force)}
+    if register:
+        out["register"] = tileset_register.register_tileset(
+            proj, basics.BASICS_FOLDER, basics.BASICS_PRIMARY, is_secondary=False
+        )
+    return out
 
 
 def main() -> None:
