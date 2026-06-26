@@ -353,6 +353,53 @@ def image_to_map(image_path: str, name: str, full_auto: bool = False,
     return imagingmod.image_to_map(_project(root), image_path, name, full_auto=full_auto)
 
 
+@mcp.tool()
+def list_tilesets(root: Optional[str] = None) -> list[dict]:
+    """List on-disk tilesets (folder, kind primary/secondary, metatile count).
+
+    Use this to pick an existing tileset ('asset pack') to recreate a map into with
+    image_to_existing_map - choose one whose art covers the source's terrain.
+    """
+    return _project(root).list_tilesets()
+
+
+@mcp.tool()
+def add_map(name: str, layout: str, map_id: Optional[str] = None,
+            group: Optional[str] = None, root: Optional[str] = None) -> dict:
+    """Create a walkable map: write data/maps/<name>/map.json and register it in
+    map_groups.json (the build auto-generates its MAP_ constant). layout must exist.
+    map_id defaults to MAP_<NAME_UPPER>.
+    """
+    project = _project(root)
+    mid = map_id or imagingmod.names_for(name)["map_id"]
+    path = project.add_map(mid, name, layout, group=group)
+    return {"written": str(path), "map": mid, "name": name}
+
+
+@mcp.tool()
+def image_to_existing_map(image_path: str, name: str,
+                          primary_tileset: str = "gTileset_General",
+                          secondary_tileset: Optional[str] = None,
+                          link_to: Optional[str] = None, link_dir: str = "left",
+                          link_offset: int = 0, link_kind: str = "connection",
+                          full_auto: bool = False, root: Optional[str] = None) -> dict:
+    """Recreate a map from an image using an EXISTING tileset, then register a walkable
+    map and (with link_to) wire it to a neighbour both ways so you can walk in and back.
+
+    Matches each 16x16 cell to the visually-closest metatile in primary_tileset (+
+    optional secondary). No Porytiles, no new tileset - because it references already-
+    registered tilesets, a normal `make` builds it into the ROM with no C edits. Returns
+    the new map id, a match_preview.png path, and a low-confidence-cell report to review
+    in Porymap. link_dir is the neighbour's direction from the new map.
+    """
+    return imagingmod.image_to_existing_map(
+        _project(root), image_path, name,
+        primary_tileset=primary_tileset, secondary_tileset=secondary_tileset,
+        link_to=link_to, link_dir=link_dir, link_offset=link_offset,
+        link_kind=link_kind, full_auto=full_auto,
+    )
+
+
 def main() -> None:
     mcp.run()
 
