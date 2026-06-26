@@ -14,6 +14,7 @@ read straight from real map data - which is also why stamped doors come out walk
 MapSpec shape:
     {
       "name": "MyTown",
+      "group": "aa_image_toMap",            # optional; created if missing (else default group)
       "primary_tileset": "gTileset_General", "secondary_tileset": "gTileset_Petalburg",
       "width": 20, "height": 18,
       "base_terrain": "grass",
@@ -250,7 +251,8 @@ def compose_map(project, spec: dict, preview: bool = True) -> dict:
     (project.root / entry["border_filepath"]).write_bytes(
         encode_blocks([Block(border_mt, 0, ELEVATION_DEFAULT)] * 4)
     )
-    map_path = project.add_map(names["map_id"], names["map_name"], names["layout_id"])
+    map_path = project.add_map(names["map_id"], names["map_name"], names["layout_id"],
+                               group=spec.get("group"), create_group=True)
 
     # reciprocal wiring so you can walk in and back out
     wiring: dict = {"linked": False}

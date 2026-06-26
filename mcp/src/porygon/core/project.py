@@ -256,6 +256,7 @@ class Project:
 
     # Keys written for a new overworld map, in pokeemerald's canonical order.
     def add_map(self, map_id: str, name: str, layout_id: str, *, group: Optional[str] = None,
+                create_group: bool = False,
                 music: str = "MUS_LITTLEROOT", region_map_section: str = "MAPSEC_LITTLEROOT_TOWN",
                 requires_flash: bool = False, weather: str = "WEATHER_NONE",
                 map_type: str = "MAP_TYPE_TOWN", allow_cycling: bool = True,
@@ -266,22 +267,27 @@ class Project:
         map_groups.json so the build picks it up (which auto-generates its MAP_ constant).
 
         ``layout_id`` must already exist in layouts.json. ``group`` defaults to the first
-        group in map_groups' group_order (the towns/routes group in vanilla).
+        group in map_groups' group_order (the towns/routes group in vanilla). Pass
+        ``create_group=True`` to register a new group (appended to group_order) if missing.
         """
         if self.map_exists(map_id) or self.map_exists(name):
             raise ProjectError(f"map {map_id!r}/{name!r} already exists")
         self.get_layout(layout_id)  # raises ProjectError if the layout isn't registered
 
         groups = self.read_map_groups()
-        order = groups.get("group_order") or []
+        order = groups.setdefault("group_order", [])
         if group is None:
             if not order:
                 raise ProjectError("map_groups.json has no group_order to default into")
             group = order[0]
         if group not in groups:
-            raise ProjectError(
-                f"map group {group!r} not in map_groups.json (have: {', '.join(order)})"
-            )
+            if not create_group:
+                raise ProjectError(
+                    f"map group {group!r} not in map_groups.json (have: {', '.join(order)}); "
+                    f"pass create_group=True to add it"
+                )
+            order.append(group)
+            groups[group] = []
 
         map_dir = self._maps_dir() / name
         if map_dir.exists():

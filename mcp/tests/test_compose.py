@@ -136,6 +136,13 @@ def test_compose_out_of_bounds_stamp_warns_not_raises(proj):
     assert res["stamps_placed"] == [] and any("out of bounds" in w for w in res["warnings"])
 
 
+def test_compose_into_new_group(proj):
+    compose.compose_map(proj, _spec(name="GroupedTown", group="aa_image_toMap"), preview=False)
+    groups = proj.read_map_groups()
+    assert "aa_image_toMap" in groups["group_order"]
+    assert "GroupedTown" in groups["aa_image_toMap"]
+
+
 def test_compose_unknown_terrain_raises(proj):
     with pytest.raises(ComposeError, match="unknown terrain"):
         compose.compose_map(proj, _spec(base_terrain="lava"), preview=False)
