@@ -1,9 +1,15 @@
-# Porygon
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)"  srcset="assets/porygon-lockup-dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="assets/porygon-lockup-light.png">
+    <img alt="Porygon" src="assets/porygon-lockup-light.png" width="320">
+  </picture>
+</p>
 
-Gold-standard tooling for **AI-augmented** pokeemerald decomp ROM hacking. It
-makes Claude a strong copilot for the workflows that matter - **debugging**,
-**creating maps from images**, and **writing event scripts** - while keeping a
-human in the loop. It is not an autonomous game builder.
+Tooling for **AI-augmented** pokeemerald decomp ROM hacking. It makes Claude a
+capable copilot for the workflows that matter - **debugging**, **creating maps
+from images**, and **writing event scripts** - while keeping a human in the
+loop. It is not an autonomous game builder.
 
 The value is in the things an LLM can't do reliably by hand:
 
