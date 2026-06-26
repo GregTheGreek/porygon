@@ -216,6 +216,48 @@ def test_compose_unsupported_tileset_pair_raises(proj):
                                         secondary_tileset="gTileset_GenericBuilding"), preview=False)
 
 
+# --- basics tileset compose ---------------------------------------------
+
+def _basics_spec(**kw):
+    base = {"name": "BTown", "primary_tileset": "gTileset_PorygonBasics",
+            "secondary_tileset": "gTileset_Petalburg", "width": 8, "height": 8,
+            "base_terrain": "grass"}
+    base.update(kw)
+    return base
+
+
+def test_compose_bridge_walkable_over_water(proj):
+    # a bridge_h region laid across a water region: bridge cells walkable, water blocked
+    compose.compose_map(proj, _basics_spec(regions=[
+        {"terrain": "water", "rect": [2, 2, 4, 4]},
+        {"terrain": "bridge_h", "rect": [1, 3, 6, 1]},
+    ]), preview=False)
+    bd = proj.read_layout_blockdata("LAYOUT_B_TOWN")
+    pal = compose.terrain_palette("gTileset_PorygonBasics", "gTileset_Petalburg")
+    assert bd.get(3, 3).metatile_id == pal["bridge_h"]["metatile_id"]
+    assert bd.get(3, 3).collision == 0          # the crossing is walkable
+    assert bd.get(3, 2).collision == 1          # water above the bridge stays blocked
+
+
+def test_compose_rock_blocks(proj):
+    compose.compose_map(proj, _basics_spec(decorations=[{"terrain": "rock", "x": 4, "y": 4}]),
+                        preview=False)
+    bd = proj.read_layout_blockdata("LAYOUT_B_TOWN")
+    assert bd.get(4, 4).collision == 1
+
+
+def test_collision_overlay_renders(tmp_path):
+    from PIL import Image
+    from porygon.core.imaging import render_collision_overlay
+    from porygon.core.tileset import MetatileAtlas
+    atlas = MetatileAtlas(ids=[0, 1], images=[Image.new("RGBA", (16, 16)), Image.new("RGBA", (16, 16))])
+    placement = [[0, 1], [1, 0]]
+    collision = [[False, True], [True, False]]
+    out = render_collision_overlay(atlas, placement, collision, tmp_path / "ov.png")
+    img = Image.open(out)
+    assert img.size == (32, 32)
+
+
 # --- shipped library loads ----------------------------------------------
 
 def test_shipped_stamps_and_terrain_load(proj):

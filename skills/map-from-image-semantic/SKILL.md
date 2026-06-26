@@ -13,6 +13,7 @@ allowed-tools:
   - Bash
   - Agent
   - mcp__porygon__validate_image
+  - mcp__porygon__init_basics_tileset
   - mcp__porygon__list_stamps
   - mcp__porygon__list_maps
   - mcp__porygon__compose_map
@@ -33,6 +34,28 @@ coherence - the right trade for "recreate the gist of this place" from any sourc
 ## When to use which
 - **Tile-native pokeemerald-style rip** (exact 16px grid) -> `map-from-image-existing` (near-exact copy).
 - **Foreign game / screenshot / upscaled / not tile-aligned** -> this skill (coherent equivalent).
+
+## Fastest path for foreign images: the basics tileset (lowfi but legible)
+
+Emerald tilesets have feature gaps (the pair with building stamps has **no bridge tiles**, etc.), which
+forces ugly fallbacks. For just **resembling** an arbitrary image, use the **porygon basics tileset** -
+a small set of unmistakable tiles where bridges/rocks/shorelines/walkability all just work:
+
+1. `init_basics_tileset` once (generates `gTileset_PorygonBasics`).
+2. Write a MapSpec with `"primary_tileset": "gTileset_PorygonBasics"`, `"secondary_tileset": "gTileset_Petalburg"`.
+3. Vocabulary (terrain classes): `grass`, `grass_light`, `tall_grass`, `sand`, `path`, `flower`,
+   `bridge_h`, `bridge_v` (walkable), `water` (auto rocky shoreline), `tree`, `cliff`, `rock`, `sign`,
+   `ledge`, `building`.
+   - **Bridges**: add a `bridge_h`/`bridge_v` region laid ACROSS a `water` region - the water auto-banks
+     around it and the bridge reads as a walkable crossing. Span it bank-to-bank.
+   - **Rocks in water**: `rock` decorations.
+   - **Border**: `tree` or `cliff` (`border_terrain`), thickness 1 - the forest/mountain extends off-map.
+4. Review BOTH `match_preview.png` (resemblance) and `collision_preview.png` (red = blocked, clear =
+   walkable) against the source - confirm bridges read as crossings and water/trees/rocks are blocked.
+
+Note: the basics map renders immediately; building it into the ROM is a tracked follow-up (the basics
+tileset isn't registered in C yet). For ROM-buildable maps with real emerald art, use the emerald
+tileset pairs below instead.
 
 ## Workflow
 

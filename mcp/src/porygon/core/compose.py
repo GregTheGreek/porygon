@@ -72,6 +72,11 @@ def load_stamps(project) -> dict:
 
 
 def terrain_palette(primary: str, secondary: str) -> dict:
+    # The generated basics tileset carries its own vocabulary (bridges, rock, water shoreline,
+    # cliff) so any image can be rendered as a legible lowfi map regardless of emerald gaps.
+    if primary == "gTileset_PorygonBasics":
+        from porygon.core.basics import basics_palette
+        return basics_palette()
     data = _load_data("terrain.json")
     key = f"{primary}+{secondary}"
     if key not in data:
@@ -404,13 +409,17 @@ def compose_map(project, spec: dict, preview: bool = True) -> dict:
 
     # preview (needs tileset binaries; optional so unit tests can skip it)
     preview_path = None
+    collision_preview_path = None
     if preview:
         from porygon.core import tileset as tilesetmod
+        from porygon.core.imaging import render_collision_overlay
         atlas = tilesetmod.render_tileset(project, prim, sec)
         placement = [[grid[j][i].metatile_id for i in range(W)] for j in range(H)]
-        preview_path = render_match_preview(
-            atlas, placement,
-            (project.root / entry["blockdata_filepath"]).parent / "match_preview.png",
+        out_dir = (project.root / entry["blockdata_filepath"]).parent
+        preview_path = render_match_preview(atlas, placement, out_dir / "match_preview.png")
+        collision = [[bool(grid[j][i].collision) for i in range(W)] for j in range(H)]
+        collision_preview_path = render_collision_overlay(
+            atlas, placement, collision, out_dir / "collision_preview.png"
         )
 
     return {
@@ -423,6 +432,7 @@ def compose_map(project, spec: dict, preview: bool = True) -> dict:
         "primary_tileset": prim, "secondary_tileset": sec,
         "stamps_placed": placed,
         "match_preview": preview_path,
+        "collision_preview": collision_preview_path,
         "wiring": wiring,
         "warnings": warnings,
         "rom_build_note": (

@@ -239,6 +239,12 @@ def cmd_compose_map(args) -> int:
     return _emit(compose.compose_map(_project(args), spec))
 
 
+def cmd_init_basics(args) -> int:
+    from porygon.core import basics
+
+    return _emit(basics.generate_basics_tileset(_project(args), force=args.force))
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="porygon", description="pokeemerald deterministic primitives")
     p.add_argument("--root", help="project root (default: auto-detect from cwd)")
@@ -388,6 +394,11 @@ def build_parser() -> argparse.ArgumentParser:
                         help="compose a walkable map from a MapSpec JSON (terrain + stamps), builds into ROM")
     cm.add_argument("spec", nargs="?", default="-", help="MapSpec JSON file, or - for stdin (default)")
     cm.set_defaults(func=cmd_compose_map)
+
+    ib = sub.add_parser("init-basics",
+                        help="generate the porygon basics tileset (simple tiles for lowfi map renders)")
+    ib.add_argument("--force", action="store_true", help="regenerate even if it already exists")
+    ib.set_defaults(func=cmd_init_basics)
 
     return p
 

@@ -294,6 +294,27 @@ def render_match_preview(atlas, placement, out_path) -> str:
     return str(out_path)
 
 
+def render_collision_overlay(atlas, placement, collision, out_path) -> str:
+    """Render the map dimmed with a red tint on impassable cells, so it is obvious at a
+    glance what is walkable. ``collision`` is a 2D grid (truthy = blocked), parallel to
+    ``placement``. A clear cell = walkable, a red cell = blocked."""
+    Image = _pil()
+    h = len(placement)
+    w = len(placement[0]) if h else 0
+    canvas = Image.new("RGBA", (w * CELL, h * CELL), (0, 0, 0, 255))
+    red = Image.new("RGBA", (CELL, CELL), (220, 40, 40, 110))
+    for r, row in enumerate(placement):
+        for c, mid in enumerate(row):
+            tile = atlas.image_for(mid)
+            if tile is not None:
+                canvas.alpha_composite(tile.convert("RGBA"), (c * CELL, r * CELL))
+            if collision[r][c]:
+                canvas.alpha_composite(red, (c * CELL, r * CELL))
+    Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+    canvas.save(out_path)
+    return str(out_path)
+
+
 def image_to_existing_map(project, image_path, name: str,
                           primary_tileset: str = "gTileset_General",
                           secondary_tileset: Optional[str] = None,
