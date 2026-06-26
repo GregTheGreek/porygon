@@ -210,6 +210,23 @@ def _edge_key(n_land: bool, e_land: bool, s_land: bool, w_land: bool):
     return None
 
 
+def _border_bin_blocks(entry: dict) -> list:
+    """The 4 blocks (row-major 2x2) for a layout's border.bin, from a terrain entry.
+
+    A `block` terrain (e.g. the 2x2 tree) tiles directly into the repeating off-map border;
+    a single-metatile terrain repeats 4x.
+    """
+    coll = entry.get("collision", 0)
+    elev = entry.get("elevation", ELEVATION_DEFAULT)
+    if "block" in entry:
+        blk = entry["block"]
+        bh, bw = len(blk), len(blk[0])
+        ids = [blk[y % bh][x % bw] for y in (0, 1) for x in (0, 1)]
+    else:
+        ids = [entry["metatile_id"]] * 4
+    return [Block(m, coll, elev) for m in ids]
+
+
 def _unique_names(project, base: str) -> dict:
     """Names for `base`, or the same with the lowest free `_NNNNN` suffix if its map/layout
     already exist. Lets the same scene be re-composed without manual renaming. The suffix is
@@ -358,10 +375,12 @@ def compose_map(project, spec: dict, preview: bool = True) -> dict:
         primary_tileset=prim, secondary_tileset=sec,
     )
     (project.root / entry["blockdata_filepath"]).write_bytes(bd.encode())
-    base_entry = terr(base)
-    border_mt = base_entry["metatile_id"] if "metatile_id" in base_entry else base_entry["block"][0][0]
+    # border.bin is the 2x2 block that repeats INFINITELY outside the playable map. Use the
+    # border terrain (e.g. tree) so the forest extends seamlessly off-map - this is why the
+    # in-map tree framing can be a thin 1-tile line instead of a thick wall. Falls back to base.
+    border_terrain_name = spec.get("border_terrain") or base
     (project.root / entry["border_filepath"]).write_bytes(
-        encode_blocks([Block(border_mt, 0, ELEVATION_DEFAULT)] * 4)
+        encode_blocks(_border_bin_blocks(terr(border_terrain_name)))
     )
     map_path = project.add_map(names["map_id"], names["map_name"], names["layout_id"],
                                group=spec.get("group"), create_group=True)
