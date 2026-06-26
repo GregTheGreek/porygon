@@ -17,6 +17,7 @@ from pathlib import Path
 from porygon.core.diagnostics import SymbolError
 from porygon.core.imaging import ImagingError
 from porygon.core.project import Project, ProjectError
+from porygon.core.tileset import TilesetError
 
 
 def _project(args) -> Project:
@@ -185,6 +186,36 @@ def cmd_image_to_map(args) -> int:
     return _emit(imaging.image_to_map(_project(args), args.image, args.name, full_auto=args.full_auto))
 
 
+def cmd_list_tilesets(args) -> int:
+    return _emit(_project(args).list_tilesets())
+
+
+def cmd_tileset_atlas(args) -> int:
+    from porygon.core import tileset as tilesetmod
+
+    project = _project(args)
+    atlas = tilesetmod.render_tileset(project, args.primary, args.secondary)
+    out = Path(args.out)
+    tilesetmod.render_atlas_sheet(atlas).save(out)
+    return _emit({"written": str(out), "metatiles": len(atlas.ids)})
+
+
+def cmd_add_map(args) -> int:
+    path = _project(args).add_map(args.map_id, args.name, args.layout, group=args.group)
+    return _emit({"written": str(path), "map": args.map_id, "name": args.name})
+
+
+def cmd_image_to_existing_map(args) -> int:
+    from porygon.core import imaging
+
+    return _emit(imaging.image_to_existing_map(
+        _project(args), args.image, args.name,
+        primary_tileset=args.primary, secondary_tileset=args.secondary,
+        link_to=args.link_to, link_dir=args.link_dir, link_offset=args.link_offset,
+        link_kind=args.link_kind, full_auto=args.full_auto,
+    ))
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="porygon", description="pokeemerald deterministic primitives")
     p.add_argument("--root", help="project root (default: auto-detect from cwd)")
@@ -283,6 +314,39 @@ def build_parser() -> argparse.ArgumentParser:
     im.add_argument("--full-auto", action="store_true", help="apply collision suggestions (no review)")
     im.set_defaults(func=cmd_image_to_map)
 
+    sub.add_parser("list-tilesets", help="list on-disk tilesets (folder, kind, metatile count)").set_defaults(
+        func=cmd_list_tilesets
+    )
+
+    ta = sub.add_parser("tileset-atlas", help="render a tileset's metatiles to a preview PNG")
+    ta.add_argument("primary", help="primary tileset label, e.g. gTileset_General")
+    ta.add_argument("out", help="output PNG path")
+    ta.add_argument("--secondary", default=None, help="secondary tileset label to include")
+    ta.set_defaults(func=cmd_tileset_atlas)
+
+    am = sub.add_parser("add-map", help="create a walkable map.json + register it in map_groups.json")
+    am.add_argument("map_id", help="e.g. MAP_MY_TOWN")
+    am.add_argument("name", help="map folder/name, e.g. MyTown")
+    am.add_argument("layout", help="existing layout id, e.g. LAYOUT_MY_TOWN")
+    am.add_argument("--group", default=None, help="map group (default: first in group_order)")
+    am.set_defaults(func=cmd_add_map)
+
+    ie = sub.add_parser("image-to-existing-map",
+                        help="image -> layout+map reusing an EXISTING tileset (builds into ROM)")
+    ie.add_argument("image")
+    ie.add_argument("name", help="base name, e.g. MyTown")
+    ie.add_argument("--primary", default="gTileset_General", help="primary tileset label to match against")
+    ie.add_argument("--secondary", default=None, help="secondary tileset label")
+    ie.add_argument("--link-to", default=None, help="neighbour map id to connect to (e.g. MAP_LITTLEROOT_TOWN)")
+    ie.add_argument("--link-dir", default="left",
+                    choices=["up", "down", "left", "right", "dive", "emerge"],
+                    help="direction of the neighbour from the new map")
+    ie.add_argument("--link-offset", type=int, default=0, help="connection offset")
+    ie.add_argument("--link-kind", default="connection", choices=["connection", "warp"],
+                    help="how to link (connection is auto-wired both ways)")
+    ie.add_argument("--full-auto", action="store_true", help="apply collision suggestions (no review)")
+    ie.set_defaults(func=cmd_image_to_existing_map)
+
     return p
 
 
@@ -290,7 +354,7 @@ def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
     try:
         return args.func(args)
-    except (ProjectError, SymbolError, ImagingError, FileNotFoundError, ValueError, OSError) as e:
+    except (ProjectError, SymbolError, ImagingError, TilesetError, FileNotFoundError, ValueError, OSError) as e:
         json.dump({"error": str(e)}, sys.stderr, indent=2)
         sys.stderr.write("\n")
         return 2
