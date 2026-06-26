@@ -61,7 +61,14 @@ def names_for(name: str) -> dict:
         "layout_id": f"LAYOUT_{snake.upper()}",
         "layout_name": f"{camel}_Layout",
         "layout_folder": camel,
+        "map_id": f"MAP_{snake.upper()}",
+        "map_name": camel,
     }
+
+
+# Opposite directions for reciprocal connection wiring.
+_OPPOSITE_DIR = {"up": "down", "down": "up", "left": "right", "right": "left",
+                 "dive": "emerge", "emerge": "dive"}
 
 
 # --- image -> cells -----------------------------------------------------
@@ -265,5 +272,140 @@ def image_to_map(project, image_path, name: str, full_auto: bool = False,
         "rom_build_note": (
             "Tileset is viewable in Porymap now. To build into the ROM, the new primary "
             "tileset must still be registered in C (headers.h/graphics.h/metatiles.h)."
+        ),
+    }
+
+
+# --- recreate a map from an image using an EXISTING tileset -------------
+
+def render_match_preview(atlas, placement, out_path) -> str:
+    """Stitch the chosen metatiles into a PNG so the human can eyeball it vs the source."""
+    Image = _pil()
+    h = len(placement)
+    w = len(placement[0]) if h else 0
+    canvas = Image.new("RGBA", (w * CELL, h * CELL), (0, 0, 0, 255))
+    for r, row in enumerate(placement):
+        for c, mid in enumerate(row):
+            tile = atlas.image_for(mid)
+            if tile is not None:
+                canvas.alpha_composite(tile.convert("RGBA"), (c * CELL, r * CELL))
+    Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+    canvas.save(out_path)
+    return str(out_path)
+
+
+def image_to_existing_map(project, image_path, name: str,
+                          primary_tileset: str = "gTileset_General",
+                          secondary_tileset: Optional[str] = None,
+                          link_to: Optional[str] = None, link_dir: str = "left",
+                          link_offset: int = 0, link_kind: str = "connection",
+                          full_auto: bool = False,
+                          confidence_threshold: float = 0.55) -> dict:
+    """Recreate a map from an image by matching each 16x16 cell to the visually-closest
+    metatile in an EXISTING in-project tileset, then register a walkable map and (if
+    ``link_to`` is given) wire it to a neighbour both ways.
+
+    No Porytiles and no new tileset: the layout references already-registered tilesets,
+    so it builds into the ROM with no manual C edits (constants are auto-generated).
+    """
+    from porygon.core import tileset as tilesetmod
+
+    info = validate_image(image_path)
+    unique, placement = dedup_cells(image_path)
+
+    # pick a secondary to pair with (layouts reference both); reuse an existing one.
+    if secondary_tileset is None:
+        existing = [l for l in project.list_layouts() if l.secondary_tileset]
+        secondary_tileset = existing[0].secondary_tileset if existing else "gTileset_General"
+
+    atlas = tilesetmod.render_tileset(project, primary_tileset, secondary_tileset)
+
+    # match each UNIQUE source cell once, then expand to the full placement grid.
+    matched_id: list[int] = []
+    matched_dist: list[float] = []
+    for cell in unique:
+        mid, dist = atlas.match(cell)
+        matched_id.append(mid)
+        matched_dist.append(dist)
+    placement_mt = [[matched_id[u] for u in row] for row in placement]
+
+    # confidence report (normalise distances across the unique cells used)
+    max_dist = max(matched_dist) if matched_dist else 1.0
+    max_dist = max_dist or 1.0
+    low_conf: list[dict] = []
+    for r, row in enumerate(placement):
+        for c, u in enumerate(row):
+            conf = 1.0 - matched_dist[u] / max_dist
+            if conf < confidence_threshold:
+                low_conf.append({"x": c, "y": r, "metatile_id": matched_id[u],
+                                 "distance": round(matched_dist[u], 2),
+                                 "confidence": round(conf, 2)})
+    low_conf.sort(key=lambda d: d["confidence"])
+
+    collision = suggest_collision(unique, placement) if full_auto else None
+    bd = placement_to_blockdata(placement_mt, collision)
+
+    names = names_for(name)
+    entry = project.add_layout(
+        names["layout_id"], names["layout_name"], info["cells_x"], info["cells_y"],
+        primary_tileset=primary_tileset, secondary_tileset=secondary_tileset,
+    )
+    (project.root / entry["blockdata_filepath"]).write_bytes(bd.encode())
+    # Border fill: the most-used matched metatile reads better than a blank metatile 0.
+    flat = [mid for row in placement_mt for mid in row]
+    border_mt = max(set(flat), key=flat.count) if flat else 0
+    (project.root / entry["border_filepath"]).write_bytes(
+        encode_blocks([Block(border_mt, 0, ELEVATION_DEFAULT)] * 4)
+    )
+
+    preview = render_match_preview(
+        atlas, placement_mt,
+        (project.root / entry["blockdata_filepath"]).parent / "match_preview.png",
+    )
+
+    # register the walkable map
+    map_path = project.add_map(names["map_id"], names["map_name"], names["layout_id"])
+
+    # wire it so you can walk in and back out
+    wiring: dict = {"linked": False}
+    if link_to:
+        if link_kind != "connection":
+            raise ImagingError(
+                f"link_kind {link_kind!r} not auto-wired; create the map then use add_warp "
+                f"on both sides, or use link_kind='connection'"
+            )
+        if not project.map_exists(link_to):
+            raise ImagingError(f"link_to map {link_to!r} not found")
+        opp = _OPPOSITE_DIR.get(link_dir)
+        if opp is None:
+            raise ImagingError(f"unknown link_dir {link_dir!r} (use {', '.join(_OPPOSITE_DIR)})")
+        project.edit_connection(names["map_id"], "add", direction=link_dir,
+                                offset=link_offset, dest_map=link_to)
+        project.edit_connection(link_to, "add", direction=opp,
+                                offset=-link_offset, dest_map=names["map_id"])
+        wiring = {"linked": True, "neighbour": link_to, "direction": link_dir,
+                  "reciprocal_direction": opp, "offset": link_offset}
+
+    return {
+        "ok": True,
+        "map": names["map_id"],
+        "map_name": names["map_name"],
+        "map_json": str(map_path),
+        "layout": names["layout_id"],
+        "primary_tileset": primary_tileset,
+        "secondary_tileset": secondary_tileset,
+        "width": info["cells_x"],
+        "height": info["cells_y"],
+        "match_preview": preview,
+        "candidates_considered": len(atlas.ids),
+        "low_confidence_count": len(low_conf),
+        "low_confidence_cells": low_conf[:50],
+        "wiring": wiring,
+        "collision": "suggested+applied" if full_auto else "passable (review in Porymap)",
+        "rom_build_note": (
+            "References existing tilesets, so a normal `make` builds it into the ROM - the "
+            "MAP_ constant is auto-generated from map_groups.json. Open the layout in Porymap "
+            "to review, and compare match_preview.png against the source image."
+            + ("" if wiring["linked"] else " Not yet reachable: pass link_to to wire a neighbour.")
         ),
     }
