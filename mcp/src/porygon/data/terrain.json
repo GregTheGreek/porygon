@@ -1,0 +1,10 @@
+{
+  "gTileset_General+gTileset_Petalburg": {
+    "grass": {"metatile_id": 1, "collision": 0, "elevation": 3},
+    "tall_grass": {"metatile_id": 454, "collision": 0, "elevation": 3},
+    "sand": {"metatile_id": 289, "collision": 0, "elevation": 3},
+    "water": {"metatile_id": 48, "collision": 1, "elevation": 3},
+    "flower": {"metatile_id": 33, "collision": 0, "elevation": 3},
+    "tree": {"block": [[468, 469], [476, 477]], "collision": 1, "elevation": 0}
+  }
+}

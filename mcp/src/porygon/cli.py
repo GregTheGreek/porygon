@@ -14,6 +14,7 @@ import json
 import sys
 from pathlib import Path
 
+from porygon.core.compose import ComposeError
 from porygon.core.diagnostics import SymbolError
 from porygon.core.imaging import ImagingError
 from porygon.core.project import Project, ProjectError
@@ -216,6 +217,28 @@ def cmd_image_to_existing_map(args) -> int:
     ))
 
 
+def cmd_list_stamps(args) -> int:
+    from porygon.core import compose
+
+    return _emit(compose.list_stamps(_project(args)))
+
+
+def cmd_extract_stamp(args) -> int:
+    from porygon.core import compose
+
+    door = tuple(int(v) for v in args.door.split(",")) if args.door else None
+    return _emit(compose.extract_stamp(
+        _project(args), args.name, args.source_map, args.x, args.y, args.w, args.h, door=door,
+    ))
+
+
+def cmd_compose_map(args) -> int:
+    from porygon.core import compose
+
+    spec = json.loads(sys.stdin.read() if args.spec == "-" else Path(args.spec).read_text())
+    return _emit(compose.compose_map(_project(args), spec))
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="porygon", description="pokeemerald deterministic primitives")
     p.add_argument("--root", help="project root (default: auto-detect from cwd)")
@@ -347,6 +370,25 @@ def build_parser() -> argparse.ArgumentParser:
     ie.add_argument("--full-auto", action="store_true", help="apply collision suggestions (no review)")
     ie.set_defaults(func=cmd_image_to_existing_map)
 
+    sub.add_parser("list-stamps", help="list available stamp prefabs (objects) for compose-map").set_defaults(
+        func=cmd_list_stamps
+    )
+
+    es = sub.add_parser("extract-stamp", help="record a stamp recipe (source map region) for reuse")
+    es.add_argument("name")
+    es.add_argument("source_map", help="map id/name to copy from, e.g. MAP_LITTLEROOT_TOWN")
+    es.add_argument("x", type=int)
+    es.add_argument("y", type=int)
+    es.add_argument("w", type=int)
+    es.add_argument("h", type=int)
+    es.add_argument("--door", default=None, help="door offset within the stamp, e.g. 3,4")
+    es.set_defaults(func=cmd_extract_stamp)
+
+    cm = sub.add_parser("compose-map",
+                        help="compose a walkable map from a MapSpec JSON (terrain + stamps), builds into ROM")
+    cm.add_argument("spec", nargs="?", default="-", help="MapSpec JSON file, or - for stdin (default)")
+    cm.set_defaults(func=cmd_compose_map)
+
     return p
 
 
@@ -354,7 +396,8 @@ def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
     try:
         return args.func(args)
-    except (ProjectError, SymbolError, ImagingError, TilesetError, FileNotFoundError, ValueError, OSError) as e:
+    except (ProjectError, SymbolError, ImagingError, TilesetError, ComposeError,
+            FileNotFoundError, ValueError, OSError) as e:
         json.dump({"error": str(e)}, sys.stderr, indent=2)
         sys.stderr.write("\n")
         return 2

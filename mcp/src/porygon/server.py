@@ -400,6 +400,50 @@ def image_to_existing_map(image_path: str, name: str,
     )
 
 
+@mcp.tool()
+def list_stamps(root: Optional[str] = None) -> list[dict]:
+    """List available stamp prefabs (multi-tile objects: house, lab, mart, ...) for compose_map.
+
+    Stamps are recipes resolved against this project's own maps at compose time. Use this
+    to see the object vocabulary before writing a MapSpec.
+    """
+    from porygon.core import compose
+
+    return compose.list_stamps(_project(root))
+
+
+@mcp.tool()
+def extract_stamp(name: str, source_map: str, x: int, y: int, w: int, h: int,
+                  door: Optional[list] = None, root: Optional[str] = None) -> dict:
+    """Record a new stamp from a rectangle of an existing map (saved to <root>/.porygon/stamps.json).
+
+    Use to grow the object library from this project's own buildings. door is an optional
+    [dx,dy] offset within the stamp.
+    """
+    from porygon.core import compose
+
+    return compose.extract_stamp(_project(root), name, source_map, x, y, w, h,
+                                 door=tuple(door) if door else None)
+
+
+@mcp.tool()
+def compose_map(spec: dict, root: Optional[str] = None) -> dict:
+    """Compose a walkable map from a high-level MapSpec (terrain regions + object stamps).
+
+    For FOREIGN / imperfect source images where image_to_existing_map fragments buildings:
+    you (vision) describe the scene as a MapSpec and this places multi-tile stamps as units
+    so houses/labs stay coherent, then registers a walkable map and wires a reciprocal
+    connection. Builds into the ROM with no C edits (existing tilesets + auto-generated
+    MAP_ constant). MapSpec keys: name, primary_tileset, secondary_tileset, width, height,
+    base_terrain, border_terrain, border_thickness, regions[], objects[], decorations[], link.
+    Returns the map id, a match_preview.png to review, and any warnings. Call list_stamps and
+    list_maps first to choose objects and a neighbour to link to.
+    """
+    from porygon.core import compose as composemod
+
+    return composemod.compose_map(_project(root), spec)
+
+
 def main() -> None:
     mcp.run()
 
