@@ -116,7 +116,7 @@ def test_compose_terrain_and_border(proj):
 def test_compose_places_stamp_with_collision(proj):
     compose.extract_stamp(proj, "blk", "MAP_SRC", 0, 0, 2, 2)  # ids 520,521 / 524,525, coll 1
     res = compose.compose_map(proj, _spec(objects=[{"stamp": "blk", "x": 2, "y": 3}]), preview=False)
-    assert res["stamps_placed"] == [{"stamp": "blk", "x": 2, "y": 3, "width": 2, "height": 2}]
+    assert res["stamps_placed"] == [{"stamp": "blk", "x": 2, "y": 3, "width": 2, "height": 2, "as": "object"}]
     bd = proj.read_layout_blockdata("LAYOUT_TEST_TOWN")
     assert bd.get(2, 3).metatile_id == 520 and bd.get(2, 3).collision == 1
     assert bd.get(3, 4).metatile_id == 525           # bottom-right of the stamp
@@ -141,6 +141,52 @@ def test_compose_into_new_group(proj):
     groups = proj.read_map_groups()
     assert "aa_image_toMap" in groups["group_order"]
     assert "GroupedTown" in groups["aa_image_toMap"]
+
+
+def test_edge_key_cases():
+    # args are (n_land, e_land, s_land, w_land); "land" = neighbour is a different class
+    assert compose._edge_key(True, False, False, True) == "NW"
+    assert compose._edge_key(True, True, False, False) == "NE"
+    assert compose._edge_key(False, False, True, True) == "SW"
+    assert compose._edge_key(False, True, True, False) == "SE"
+    assert compose._edge_key(True, False, False, False) == "N"
+    assert compose._edge_key(False, True, False, False) == "E"
+    assert compose._edge_key(False, False, True, False) == "S"
+    assert compose._edge_key(False, False, False, True) == "W"
+    assert compose._edge_key(False, False, False, False) is None  # interior -> fill
+
+
+def test_compose_water_autotiles_shoreline(proj):
+    # a water region in a grass field gets banked edges + corners; interior stays fill
+    compose.compose_map(proj, _spec(width=8, height=8,
+                                    regions=[{"terrain": "water", "rect": [2, 2, 4, 4]}]), preview=False)
+    bd = proj.read_layout_blockdata("LAYOUT_TEST_TOWN")
+    edges = compose.terrain_palette("gTileset_General", "gTileset_Petalburg")["water"]["edges"]
+    assert bd.get(2, 2).metatile_id == edges["NW"]
+    assert bd.get(5, 2).metatile_id == edges["NE"]
+    assert bd.get(2, 5).metatile_id == edges["SW"]
+    assert bd.get(5, 5).metatile_id == edges["SE"]
+    assert bd.get(3, 2).metatile_id == edges["N"]      # top side
+    assert bd.get(2, 3).metatile_id == edges["W"]      # left side
+    assert bd.get(3, 3).metatile_id == edges["fill"]   # interior
+    assert bd.get(3, 3).collision == 1                 # water still impassable
+
+
+def test_compose_no_autotile_without_edges(proj):
+    # grass/tree define no `edges`, so the autotile pass must leave them untouched
+    compose.compose_map(proj, _spec(border_terrain="tree", border_thickness=1), preview=False)
+    bd = proj.read_layout_blockdata("LAYOUT_TEST_TOWN")
+    assert bd.get(2, 2).metatile_id == GRASS  # plain grass interior, not rewritten
+
+
+def test_region_stamp_blits_verbatim_and_skips_autotile(proj):
+    compose.extract_stamp(proj, "blk", "MAP_SRC", 0, 0, 2, 2)  # ids 520,521 / 524,525
+    res = compose.compose_map(proj, _spec(width=8, height=8,
+                                          regions=[{"stamp": "blk", "rect": [3, 3]}]), preview=False)
+    assert {"stamp": "blk", "x": 3, "y": 3, "width": 2, "height": 2, "as": "region"} in res["stamps_placed"]
+    bd = proj.read_layout_blockdata("LAYOUT_TEST_TOWN")
+    assert bd.get(3, 3).metatile_id == 520   # verbatim real geometry, not filled/autotiled
+    assert bd.get(4, 4).metatile_id == 525
 
 
 def test_compose_unknown_terrain_raises(proj):

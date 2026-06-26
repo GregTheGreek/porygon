@@ -50,7 +50,10 @@ coherence - the right trade for "recreate the gist of this place" from any sourc
      "primary_tileset": "gTileset_General", "secondary_tileset": "gTileset_Petalburg",
      "width": 20, "height": 18,
      "base_terrain": "grass", "border_terrain": "tree", "border_thickness": 2,
-     "regions": [{"terrain": "water", "rect": [13, 4, 5, 4]}],
+     "regions": [
+       {"terrain": "water", "rect": [13, 4, 5, 4]},
+       {"stamp": "tree_grove", "rect": [2, 9]}
+     ],
      "objects": [{"stamp": "house", "x": 3, "y": 4}, {"stamp": "lab", "x": 6, "y": 10}],
      "decorations": [{"terrain": "flower", "x": 4, "y": 14}],
      "link": {"to": "MAP_LITTLEROOT_TOWN", "dir": "up", "offset": 0}
@@ -59,6 +62,12 @@ coherence - the right trade for "recreate the gist of this place" from any sourc
    Terrain classes and stamps must exist for the tileset pair (`list_stamps`; terrain is
    grass/tall_grass/sand/water/flower/tree for general+petalburg). Stamp `x,y` is the
    top-left cell; keep stamps inside the border.
+   - **Water gets real shorelines automatically.** Just place a `water` region as a
+     rectangle (or several, for a river/strips) - porygon autotiles a rocky bank + corners
+     around it. Don't try to hand-place edge tiles; a plain rectangle is correct input.
+   - **macro-region stamps** (`{"stamp": <name>, "rect": [x, y]}` in `regions`) drop a whole
+     real-map chunk in verbatim (e.g. `tree_grove`, `ledge_h`) for discrete natural features
+     a flood-fill can't make. They're the `region`-tagged entries in `list_stamps`.
 4. **Compose.** `compose_map(spec)`. It writes the layout + walkable map, wires the
    reciprocal connection, and returns a `match_preview.png` + any `warnings`.
 5. **Review + iterate.** Read `match_preview.png` and compare to the source. Adjust object
@@ -68,5 +77,7 @@ coherence - the right trade for "recreate the gist of this place" from any sourc
 ## Honest framing
 - This produces a **coherent equivalent**, not a pixel copy - that's the point for foreign art.
 - Buildings are **solid with walkable doors**; you cannot enter them (no interiors in v1).
+- Water autotiling banks **convex** edges/corners cleanly; deeply **concave** river bends fall
+  back to plain water (no inner-corner nub yet). Rectangular ponds and straight strips are ideal.
 - Terrain ids assume a vanilla `gTileset_General`; stamps are recipe-resolved so they adapt
   to the project's own art. Without a `link`, the map is created but not reachable.

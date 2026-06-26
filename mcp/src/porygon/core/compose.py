@@ -19,11 +19,18 @@ MapSpec shape:
       "width": 20, "height": 18,
       "base_terrain": "grass",
       "border_terrain": "tree", "border_thickness": 2,
-      "regions": [{"terrain": "water", "rect": [13, 4, 5, 4]}],
+      "regions": [
+        {"terrain": "water", "rect": [13, 4, 5, 4]},   # filled + auto-banked (shoreline)
+        {"stamp": "pond_with_shore", "rect": [3, 3]}    # OR drop a real-map chunk verbatim
+      ],
       "objects": [{"stamp": "house", "x": 3, "y": 4}],
       "decorations": [{"terrain": "flower", "x": 4, "y": 14}],
       "link": {"to": "MAP_LITTLEROOT_TOWN", "dir": "up", "offset": 0}
     }
+
+Terrain whose palette entry defines `edges` (e.g. water) is autotiled after fill: a
+post-pass rewrites boundary cells to the correct edge/corner metatile so water gets a
+real rocky shoreline instead of a hard rectangle. Stamped cells are never autotiled.
 """
 
 from __future__ import annotations
@@ -68,8 +75,9 @@ def terrain_palette(primary: str, secondary: str) -> dict:
     data = _load_data("terrain.json")
     key = f"{primary}+{secondary}"
     if key not in data:
+        pairs = [k for k in data if not k.startswith("_")]
         raise ComposeError(
-            f"no terrain palette for tileset pair {key!r} (have: {', '.join(data)}). "
+            f"no terrain palette for tileset pair {key!r} (have: {', '.join(pairs)}). "
             f"Add one to data/terrain.json or use a supported pair."
         )
     return data[key]
@@ -171,6 +179,37 @@ def _terrain_block(entry: dict, gx: int, gy: int) -> Block:
     return Block(metatile_id=mid, collision=coll, elevation=elev)
 
 
+# Cells written by a stamp/region-stamp are tagged this class so the autotile pass
+# never rewrites verbatim real geometry.
+_OBJECT_CLASS = "object"
+
+
+def _edge_key(n_land: bool, e_land: bool, s_land: bool, w_land: bool):
+    """Which outer edge/corner a cell sits on, given which 4-dir neighbours are a
+    DIFFERENT terrain class ("land"). Returns None for an interior cell (use fill).
+
+    Handles convex corners + straight sides (the common case: rectangular/strip
+    water regions). Concave (inner) corners fall back to fill in v1.
+    """
+    if n_land and w_land:
+        return "NW"
+    if n_land and e_land:
+        return "NE"
+    if s_land and w_land:
+        return "SW"
+    if s_land and e_land:
+        return "SE"
+    if n_land:
+        return "N"
+    if s_land:
+        return "S"
+    if w_land:
+        return "W"
+    if e_land:
+        return "E"
+    return None
+
+
 def compose_map(project, spec: dict, preview: bool = True) -> dict:
     """Compose a walkable map from a MapSpec: terrain fill + stamps + reciprocal link.
 
@@ -191,20 +230,46 @@ def compose_map(project, spec: dict, preview: bool = True) -> dict:
         return palette[tname]
 
     grid: list[list[Optional[Block]]] = [[None] * W for _ in range(H)]
+    # Parallel terrain-class grid, used by the autotile pass to find boundaries.
+    class_grid: list[list[str]] = [[""] * W for _ in range(H)]
 
     def fill(tname: str, x0: int, y0: int, w: int, h: int) -> None:
         e = terr(tname)
         for j in range(max(0, y0), min(H, y0 + h)):
             for i in range(max(0, x0), min(W, x0 + w)):
                 grid[j][i] = _terrain_block(e, i, j)
+                class_grid[j][i] = tname
 
     # 1. base terrain
     base = spec.get("base_terrain", "grass")
     fill(base, 0, 0, W, H)
-    # 2. terrain regions (in order)
+    warnings: list[str] = []
+    placed: list[dict] = []
+
+    def place_stamp(nm: str, ox: int, oy: int, as_: str) -> None:
+        """Blit a resolved stamp verbatim and tag its cells `object` (never autotiled)."""
+        if nm not in stamps_lib:
+            raise ComposeError(f"unknown stamp {nm!r} (have: {', '.join(sorted(stamps_lib))})")
+        st = resolve_stamp(project, nm, stamps_lib[nm])
+        if ox < 0 or oy < 0 or ox + st.width > W or oy + st.height > H:
+            warnings.append(f"stamp {nm!r} at ({ox},{oy}) [{st.width}x{st.height}] out of bounds; skipped")
+            return
+        for j in range(st.height):
+            for i in range(st.width):
+                grid[oy + j][ox + i] = st.blocks[j][i]
+                class_grid[oy + j][ox + i] = _OBJECT_CLASS
+        placed.append({"stamp": nm, "x": ox, "y": oy, "width": st.width, "height": st.height, "as": as_})
+
+    # 2. terrain regions (in order). A region may name a `stamp` (a macro-region real-map
+    #    chunk, e.g. pond_with_shore) instead of a `terrain` fill, in which case the real
+    #    geometry is dropped in verbatim and excluded from autotiling.
     for reg in spec.get("regions", []):
-        rx, ry, rw, rh = reg["rect"]
-        fill(reg["terrain"], rx, ry, rw, rh)
+        rx, ry = int(reg["rect"][0]), int(reg["rect"][1])
+        if reg.get("stamp"):
+            place_stamp(reg["stamp"], rx, ry, "region")
+        else:
+            rw, rh = int(reg["rect"][2]), int(reg["rect"][3])
+            fill(reg["terrain"], rx, ry, rw, rh)
     # 3. border rings
     bt = spec.get("border_terrain")
     thick = int(spec.get("border_thickness", 0))
@@ -214,27 +279,45 @@ def compose_map(project, spec: dict, preview: bool = True) -> dict:
             for i in range(W):
                 if i < thick or i >= W - thick or j < thick or j >= H - thick:
                     grid[j][i] = _terrain_block(e, i, j)
+                    class_grid[j][i] = bt
     # 4. object stamps
-    warnings: list[str] = []
-    placed: list[dict] = []
     for obj in spec.get("objects", []):
-        nm = obj["stamp"]
-        if nm not in stamps_lib:
-            raise ComposeError(f"unknown stamp {nm!r} (have: {', '.join(sorted(stamps_lib))})")
-        st = resolve_stamp(project, nm, stamps_lib[nm])
-        ox, oy = int(obj["x"]), int(obj["y"])
-        if ox < 0 or oy < 0 or ox + st.width > W or oy + st.height > H:
-            warnings.append(f"stamp {nm!r} at ({ox},{oy}) [{st.width}x{st.height}] out of bounds; skipped")
-            continue
-        for j in range(st.height):
-            for i in range(st.width):
-                grid[oy + j][ox + i] = st.blocks[j][i]
-        placed.append({"stamp": nm, "x": ox, "y": oy, "width": st.width, "height": st.height})
+        place_stamp(obj["stamp"], int(obj["x"]), int(obj["y"]), "object")
     # 5. single-cell decorations
     for dec in spec.get("decorations", []):
         dx, dy = int(dec["x"]), int(dec["y"])
         if 0 <= dx < W and 0 <= dy < H:
             grid[dy][dx] = _terrain_block(terr(dec["terrain"]), dx, dy)
+            class_grid[dy][dx] = dec["terrain"]
+
+    # 6. autotile pass: rewrite terrain boundary cells to the correct edge/corner
+    #    metatile so regions (esp. water) get real shorelines instead of hard seams.
+    #    Only classes that define `edges` are affected; stamped ("object") cells are
+    #    never rewritten. Out-of-bounds counts as same-class (no bank vs the map edge).
+    def _same(i: int, j: int, cls: str) -> bool:
+        if i < 0 or j < 0 or i >= W or j >= H:
+            return True
+        return class_grid[j][i] == cls
+
+    for j in range(H):
+        for i in range(W):
+            cls = class_grid[j][i]
+            entry = palette.get(cls)
+            if not entry or "edges" not in entry:
+                continue
+            edges = entry["edges"]
+            key = _edge_key(
+                not _same(i, j - 1, cls), not _same(i + 1, j, cls),
+                not _same(i, j + 1, cls), not _same(i - 1, j, cls),
+            )
+            mid = edges.get(key) if key else None
+            if mid is None:
+                mid = edges.get("fill", entry.get("metatile_id"))
+            grid[j][i] = Block(
+                metatile_id=mid,
+                collision=entry.get("collision", 0),
+                elevation=entry.get("elevation", ELEVATION_DEFAULT),
+            )
 
     blocks = [grid[j][i] for j in range(H) for i in range(W)]
     bd = Blockdata(width=W, height=H, blocks=blocks)

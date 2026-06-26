@@ -1,10 +1,18 @@
 {
+  "_provenance": "Metatile ids are from vanilla pokeemerald gTileset_General (primary, shared). Terrain fills verified against PetalburgCity/Route101/Route103 layouts; the water `edges` rocky-bank set (ids 176-218) was identified by metatile water-behavior bytes in data/tilesets/primary/general/metatile_attributes.bin and validated by rendering candidate ponds (see scratchpad pond2/pond3). Water has no grass-direct shoreline in vanilla; it banks with rock, hence the bank ring. Edge keys: N/E/S/W sides, NW/NE/SW/SE outer corners, fill interior. Inner (concave) corners fall back to fill in v1.",
   "gTileset_General+gTileset_Petalburg": {
     "grass": {"metatile_id": 1, "collision": 0, "elevation": 3},
     "tall_grass": {"metatile_id": 454, "collision": 0, "elevation": 3},
     "sand": {"metatile_id": 289, "collision": 0, "elevation": 3},
-    "water": {"metatile_id": 48, "collision": 1, "elevation": 3},
     "flower": {"metatile_id": 33, "collision": 0, "elevation": 3},
-    "tree": {"block": [[468, 469], [476, 477]], "collision": 1, "elevation": 0}
+    "tree": {"block": [[468, 469], [476, 477]], "collision": 1, "elevation": 0},
+    "water": {
+      "metatile_id": 192, "collision": 1, "elevation": 3,
+      "edges": {
+        "fill": 192,
+        "N": 177, "S": 201, "W": 203, "E": 204,
+        "NW": 176, "NE": 187, "SW": 200, "SE": 202
+      }
+    }
   }
 }

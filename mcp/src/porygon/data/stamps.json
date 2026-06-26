@@ -23,5 +23,15 @@
     "source_map": "MAP_OLDALE_TOWN", "rect": [14, 13, 4, 4],
     "primary_tileset": "gTileset_General", "secondary_tileset": "gTileset_Petalburg",
     "door": [1, 3], "tags": ["building", "house"]
+  },
+  "tree_grove": {
+    "source_map": "MAP_ROUTE102", "rect": [10, 10, 8, 8],
+    "primary_tileset": "gTileset_General", "secondary_tileset": "gTileset_Petalburg",
+    "tags": ["region", "trees", "forest"]
+  },
+  "ledge_h": {
+    "source_map": "MAP_ROUTE102", "rect": [20, 6, 6, 1],
+    "primary_tileset": "gTileset_General", "secondary_tileset": "gTileset_Petalburg",
+    "tags": ["region", "ledge"]
   }
 }
