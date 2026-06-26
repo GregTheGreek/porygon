@@ -22,7 +22,7 @@ Centered header that swaps with GitHub's light/dark theme:
   </picture>
 </p>
 
-<p align="center">Gold-standard tooling for AI-augmented pokeemerald decomp ROM hacking.</p>
+<p align="center">Tooling for AI-augmented pokeemerald decomp ROM hacking.</p>
 ```
 
 Just the mark:
