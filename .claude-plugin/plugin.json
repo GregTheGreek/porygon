@@ -1,6 +1,6 @@
 {
   "name": "porygon",
-  "description": "AI-augmented pokeemerald ROM hacking: binary map I/O, build/debug loop, event scripting, and image-to-map. Augments Porymap and the decomp workflow; not autonomous.",
+  "description": "AI-augmented pokeemerald ROM hacking: binary map I/O, build/debug loop, event scripting, and map wiring. Augments Porymap and the decomp workflow; not autonomous.",
   "version": "0.1.0",
   "author": {
     "name": "Gregory Markou"
