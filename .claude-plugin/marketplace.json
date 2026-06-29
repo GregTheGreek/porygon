@@ -10,7 +10,7 @@
   "plugins": [
     {
       "name": "porygon",
-      "description": "Binary map I/O, build/debug loop, event scripting, and image-to-map for pokeemerald. Augments the workflow; keeps a human in the loop.",
+      "description": "Binary map I/O, build/debug loop, event scripting, and map wiring for pokeemerald. Augments the workflow; keeps a human in the loop.",
       "version": "0.1.0",
       "source": "./",
       "category": "game-dev",
