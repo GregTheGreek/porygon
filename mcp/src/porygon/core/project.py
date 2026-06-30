@@ -10,8 +10,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from porygon.core.attributes import MetatileAttr, decode_attributes, encode_attributes
-from porygon.core.blockdata import Blockdata, decode_blocks, encode_blocks
+from porygon.core.attributes import MetatileAttr, decode_attributes
+from porygon.core.blockdata import Blockdata, decode_blocks
 
 
 class ProjectError(Exception):
@@ -99,7 +99,7 @@ class Project:
 
     def list_layouts(self) -> list[Layout]:
         data = self._layouts_json()
-        return [Layout.from_json(l) for l in data["layouts"] if l]
+        return [Layout.from_json(lay) for lay in data["layouts"] if lay]
 
     def get_layout(self, layout_id: str) -> Layout:
         for layout in self.list_layouts():
@@ -137,7 +137,7 @@ class Project:
         blockdata - caller writes map.bin/border.bin to the returned paths.
         """
         data = self._layouts_json()
-        if any(l and l.get("id") == layout_id for l in data["layouts"]):
+        if any(lay and lay.get("id") == layout_id for lay in data["layouts"]):
             raise ProjectError(f"layout {layout_id!r} already exists")
         # Derive a folder name from the layout's display name (strip a _Layout suffix).
         folder = name[:-len("_Layout")] if name.endswith("_Layout") else name

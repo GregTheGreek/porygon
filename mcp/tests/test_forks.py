@@ -6,8 +6,6 @@ These build a minimal project skeleton in a tmp dir, so they run anywhere
 
 import json
 
-import pytest
-
 from porygon.core.project import Project
 
 

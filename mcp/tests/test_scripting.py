@@ -15,7 +15,6 @@ from porygon.core.scripting import (
     validate_map_scripts,
 )
 
-
 # --- unit: parsers ------------------------------------------------------
 
 def test_parse_labels_global_vs_local():
