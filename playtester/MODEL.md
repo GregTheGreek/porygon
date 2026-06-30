@@ -15,19 +15,34 @@ Each span is one of three types; checkpoints are the seams between them.
 
 ## Why the split (validated)
 
-A full-chain replay (fresh reset → replay 4 hand-recorded segments back-to-back,
-**no** checkpoint reloads between them) landed frame-exact on both
-navigation/dialogue segments and **diverged on the segment containing the
-legendary battle**. The GBA RNG advances every frame, so reaching a point via a
-replay-chain leaves RNG in a different phase than when the savestate was
-captured; the encounter then resolves differently and inputs desync.
+Two replay experiments:
 
-Takeaway:
-- **Savestates are the deterministic anchors** — they capture exact RNG state.
-- **Replay is reliable only from a loaded checkpoint**, never chained from a
-  replayed predecessor.
-- **The agent owns RNG events.** Replay can't reproduce them across a chain, so
-  the agent plays them live.
+1. **Full-chain replay** (fresh reset → replay 4 recorded segments back-to-back,
+   no reloads): frame-exact on both navigation/dialogue segments, **diverged on
+   the segment containing the legendary battle**.
+2. **Battle segment from its own loaded savestate** (`after_starter.ss` →
+   replay): **also diverged** (ended on a different map entirely). Savestate
+   anchoring was NOT enough to reproduce the battle.
+
+Meanwhile the first navigation segment replayed **exactly** from its savestate.
+The difference: that segment was recorded right after *loading* its checkpoint
+(recording frame-aligned with the savestate), whereas the battle segment was
+recorded a few frames after *saving* its checkpoint. For navigation a few frames
+of phase error is harmless (position re-converges); for a battle it changes when
+the wild encounter triggers and how rolls resolve, and that cascades.
+
+Takeaways:
+- **RNG spans don't reliably replay, even from a savestate.** Small phase/timing
+  error doesn't re-converge in a battle — it diverges. **The agent must own RNG
+  events** and play them live to the target. (This is the core of the model.)
+- **Deterministic spans (navigation/dialogue) replay reliably**, and are
+  tolerant of minor start misalignment because position/dialogue re-converges.
+- **Record deterministic spans frame-aligned with their anchor**: load the
+  checkpoint, *then* start recording, *then* play. Saves you from latent phase
+  drift. (seg1 did this and was exact; seg3 didn't and wasn't.)
+- **Savestates are the seams**, but they are reliable replay *starts* only for
+  deterministic spans; for RNG spans they are the agent's *handoff* and *target*
+  points, not a guarantee of replay.
 
 ## The agent-span contract
 
