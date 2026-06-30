@@ -1,0 +1,48 @@
+{
+  "profile": "pokeemerald-platinum",
+  "player_obj": "0x02001678",
+  "_comment": "Ordered spans from a fresh cartridge. Each span loads `from` (a checkpoint), runs by its type, must satisfy `target`, then is saved as `checkpoint`. target is a subset-match against STATE.",
+  "spans": [
+    {
+      "id": "intro",
+      "type": "script",
+      "fn": "intro_to_first_move",
+      "checkpoint": "checkpoints/pokeemerald-platinum/first_movement.ss",
+      "target": {"map_group": 5, "map_num": 1, "active": 1}
+    },
+    {
+      "id": "to_starter",
+      "type": "replay",
+      "from": "checkpoints/pokeemerald-platinum/first_movement.ss",
+      "recording": "recordings/pokeemerald-platinum/firstmove_to_starter.json",
+      "checkpoint": "checkpoints/pokeemerald-platinum/before_starter.ss",
+      "target": {"map_group": 0, "map_num": 0, "x": 24, "y": 21}
+    },
+    {
+      "id": "pick_starter",
+      "type": "replay",
+      "from": "checkpoints/pokeemerald-platinum/before_starter.ss",
+      "recording": "recordings/pokeemerald-platinum/starter_to_afterstarter.json",
+      "checkpoint": "checkpoints/pokeemerald-platinum/after_starter.ss",
+      "target": {"map_group": 0, "map_num": 0, "x": 11, "y": 13}
+    },
+    {
+      "id": "legendary_to_sandgem",
+      "type": "agent",
+      "from": "checkpoints/pokeemerald-platinum/after_starter.ss",
+      "goal": "Trigger and survive the Lake Verity legendary encounter, then walk into Sandgem Town.",
+      "recording_hint": "recordings/pokeemerald-platinum/afterstarter_to_sandgem.json",
+      "checkpoint": "checkpoints/pokeemerald-platinum/sandgem_complete.ss",
+      "target": {"map_group": 0, "map_num": 1, "x": 32, "y": 19},
+      "_note": "RNG span (wild battle). Pure replay-chain diverges here; agent plays it to the target. recording_hint is a reference take that only reproduces when replayed from its own savestate."
+    },
+    {
+      "id": "leave_sandgem",
+      "type": "replay",
+      "from": "checkpoints/pokeemerald-platinum/sandgem_complete.ss",
+      "recording": "recordings/pokeemerald-platinum/sandgem_to_leaving.json",
+      "checkpoint": "checkpoints/pokeemerald-platinum/leaving_sandgem.ss",
+      "target": {"map_group": 0, "map_num": 1, "x": 28, "y": 31}
+    }
+  ]
+}
