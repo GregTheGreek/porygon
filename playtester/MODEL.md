@@ -20,7 +20,7 @@ Two replay experiments:
 1. **Full-chain replay** (fresh reset → replay 4 recorded segments back-to-back,
    no reloads): frame-exact on both navigation/dialogue segments, **diverged on
    the segment containing the legendary battle**.
-2. **Battle segment from its own loaded savestate** (`after_starter.ss` →
+2. **Battle segment from its own loaded savestate** (`02_after_starter.ss` →
    replay): **also diverged** (ended on a different map entirely). Savestate
    anchoring was NOT enough to reproduce the battle.
 

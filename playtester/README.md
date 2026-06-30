@@ -18,7 +18,7 @@ playtester/
   pokeemerald_platinum.py      # pokeemerald-platinum profile: addresses + intro sequence
   checkpoints/
     pokeemerald-platinum/
-      first_movement.ss        # mGBA savestate at first manual control
+      00_first_movement.ss     # mGBA savestate at first manual control (numbered = chronological)
 ```
 
 Generic code (transport, primitives, frame-synced timing, the EWRAM player
