@@ -72,5 +72,33 @@ cd mcp && uv sync
 uv run porygon info
 ```
 
+### Or let your agent set it up
+
+Once porygon is available to your agent, paste this prompt and fill in the path -
+it will install, wire up, and verify the toolkit against your checkout:
+
+```text
+Set up porygon for my pokeemerald project.
+
+- My decomp checkout is at: <PATH-TO-POKEEMERALD>
+- Install the server deps: from porygon's `mcp/` run `uv sync`.
+- Make porygon available: register the MCP server
+  (command: `uv run --directory <PORYGON>/mcp python -m porygon.server`),
+  or if I'm on Claude Code, install the plugin from `.claude-plugin/`.
+- Drop `templates/pokeemerald-CLAUDE.md` into my checkout as `CLAUDE.md`
+  (merge into the existing one if there is one).
+- From my checkout, run `uv run porygon info` and confirm it detects the
+  project and any pokeemerald-expansion fork.
+- Tell me what porygon detected and what I can now do (debug, scripting,
+  map wiring), then stop - don't change any game code yet.
+```
+
+## Scope
+
+porygon targets the **pokeemerald** decomp (and expansion forks) today.
+Broadening beyond emerald decomp hacks is on the roadmap, but deliberately out of
+scope for now - the focus is making the debug, scripting, and map-wiring loop
+rock-solid there first.
+
 This is an unofficial community tool; it is not affiliated with or endorsed by
 pret or the Porymap project.
