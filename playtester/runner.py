@@ -125,11 +125,18 @@ class Runner:
 
 
 if __name__ == "__main__":
-    import pokeemerald_platinum as P
+    import importlib.util
+
+    here = os.path.dirname(os.path.abspath(__file__))
+    game_dir = os.path.join(here, "games", "pokeemerald_platinum")
+    spec = importlib.util.spec_from_file_location("profile", os.path.join(game_dir, "profile.py"))
+    P = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(P)
+
     e = Emu()
     runner = Runner(
         e,
-        manifest_path=os.path.join(os.path.dirname(__file__), "manifest.example.json"),
+        manifest_path=os.path.join(game_dir, "manifest.json"),
         scripts={"intro_to_first_move": P.intro_to_first_move},
         # agent_fn=<wire Claude or a policy here>,
     )

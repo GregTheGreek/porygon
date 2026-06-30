@@ -7,41 +7,41 @@
       "id": "intro",
       "type": "script",
       "fn": "intro_to_first_move",
-      "checkpoint": "checkpoints/pokeemerald-platinum/00_first_movement.ss",
+      "checkpoint": "checkpoints/00_first_movement.ss",
       "target": {"map_group": 5, "map_num": 1, "active": 1}
     },
     {
       "id": "to_starter",
       "type": "replay",
-      "from": "checkpoints/pokeemerald-platinum/00_first_movement.ss",
-      "recording": "recordings/pokeemerald-platinum/01_firstmove_to_starter.json",
-      "checkpoint": "checkpoints/pokeemerald-platinum/01_before_starter.ss",
+      "from": "checkpoints/00_first_movement.ss",
+      "recording": "recordings/01_firstmove_to_starter.json",
+      "checkpoint": "checkpoints/01_before_starter.ss",
       "target": {"map_group": 0, "map_num": 0, "x": 24, "y": 21}
     },
     {
       "id": "pick_starter",
       "type": "replay",
-      "from": "checkpoints/pokeemerald-platinum/01_before_starter.ss",
-      "recording": "recordings/pokeemerald-platinum/02_starter_to_afterstarter.json",
-      "checkpoint": "checkpoints/pokeemerald-platinum/02_after_starter.ss",
+      "from": "checkpoints/01_before_starter.ss",
+      "recording": "recordings/02_starter_to_afterstarter.json",
+      "checkpoint": "checkpoints/02_after_starter.ss",
       "target": {"map_group": 0, "map_num": 0, "x": 11, "y": 13}
     },
     {
       "id": "legendary_to_sandgem",
       "type": "agent",
-      "from": "checkpoints/pokeemerald-platinum/02_after_starter.ss",
+      "from": "checkpoints/02_after_starter.ss",
       "goal": "Trigger and survive the Lake Verity legendary encounter, then walk into Sandgem Town.",
-      "recording_hint": "recordings/pokeemerald-platinum/03_afterstarter_to_sandgem.json",
-      "checkpoint": "checkpoints/pokeemerald-platinum/03_sandgem_complete.ss",
+      "recording_hint": "recordings/03_afterstarter_to_sandgem.json",
+      "checkpoint": "checkpoints/03_sandgem_complete.ss",
       "target": {"map_group": 0, "map_num": 1, "x": 32, "y": 19},
       "_note": "RNG span (wild battle). Pure replay-chain diverges here; agent plays it to the target. recording_hint is a reference take that only reproduces when replayed from its own savestate."
     },
     {
       "id": "leave_sandgem",
       "type": "replay",
-      "from": "checkpoints/pokeemerald-platinum/03_sandgem_complete.ss",
-      "recording": "recordings/pokeemerald-platinum/04_sandgem_to_leaving.json",
-      "checkpoint": "checkpoints/pokeemerald-platinum/04_leaving_sandgem.ss",
+      "from": "checkpoints/03_sandgem_complete.ss",
+      "recording": "recordings/04_sandgem_to_leaving.json",
+      "checkpoint": "checkpoints/04_leaving_sandgem.ss",
       "target": {"map_group": 0, "map_num": 1, "x": 28, "y": 31}
     }
   ]

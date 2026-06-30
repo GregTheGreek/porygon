@@ -16,11 +16,17 @@ Sinnoh remake hack, ~/Desktop/pokeemerald.gba in dev), NOT vanilla Emerald:
     so a generous fixed A-count safely lands on and fills the field.
 
 Run (after loading porygon_io_server.lua in mGBA, ROM at the title/anywhere):
-    python3 pokeemerald_platinum.py
+    python3 games/pokeemerald_platinum/profile.py
 """
 from __future__ import annotations
 
+import os
+import sys
 from pathlib import Path
+
+# Generic harness lives two dirs up (playtester/); make it importable when this
+# profile is run standalone.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from emu import Emu
 
@@ -31,7 +37,7 @@ PLAYER_OBJ = 0x02001678
 # (the "So you're <NAME>?" YES/NO menu); 16 was too tight, 36 is reliable.
 DIALOGUE_GAP = 36
 
-CHECKPOINT_DIR = Path(__file__).resolve().parent / "checkpoints" / "pokeemerald-platinum"
+CHECKPOINT_DIR = Path(__file__).resolve().parent / "checkpoints"
 
 
 def intro_to_first_move(e: Emu, verbose: bool = True) -> dict:

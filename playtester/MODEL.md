@@ -72,4 +72,5 @@ RNG state) for the next span.
    bundles the legendary battle inline; it works only when replayed from its own
    savestate, so it is modeled as an `agent` span (recording kept as reference).
 
-See `manifest.example.json` for the span schema and `runner.py` for the loop.
+See `games/pokeemerald_platinum/manifest.json` for the span schema and
+`runner.py` for the loop.
