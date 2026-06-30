@@ -37,7 +37,7 @@ def cmd_list_maps(args) -> int:
 
 
 def cmd_list_layouts(args) -> int:
-    return _emit([l.to_dict() for l in _project(args).list_layouts()])
+    return _emit([lay.to_dict() for lay in _project(args).list_layouts()])
 
 
 def cmd_get_layout(args) -> int:

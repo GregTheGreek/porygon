@@ -1,0 +1,51 @@
+name: Bug report
+description: Report something porygon does incorrectly
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug. Please do **not** attach ROMs, save files, or
+        ripped game assets - porygon never needs them.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did you run, and what went wrong?
+      placeholder: |
+        Command: `uv run porygon ...`
+        Expected: ...
+        Actual: ...
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Minimal steps against a clean pokeemerald (or fork) checkout.
+    validations:
+      required: true
+  - type: input
+    id: decomp
+    attributes:
+      label: Decomp project
+      description: pokeemerald, pokeemerald-expansion, a platinum/other fork, plus commit if known.
+      placeholder: "pokeemerald-expansion @ abc1234"
+    validations:
+      required: false
+  - type: input
+    id: env
+    attributes:
+      label: Environment
+      description: OS, Python version, porygon version (`uv run porygon --version` or plugin version).
+      placeholder: "macOS 14, Python 3.12, porygon 0.1.0"
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / output
+      description: Relevant error output. Will be rendered as code.
+      render: shell
+    validations:
+      required: false

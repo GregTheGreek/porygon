@@ -1,0 +1,24 @@
+name: Feature request
+description: Suggest an improvement to porygon
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / motivation
+      description: What workflow is painful today? porygon focuses on debugging, event scripting, and map wiring with a human in the loop.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What should porygon do? A CLI/MCP tool sketch helps.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+    validations:
+      required: false

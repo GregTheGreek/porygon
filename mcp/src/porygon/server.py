@@ -67,7 +67,7 @@ def list_maps(root: Optional[str] = None) -> list[dict]:
 @mcp.tool()
 def list_layouts(root: Optional[str] = None) -> list[dict]:
     """List all layouts with dimensions and tilesets."""
-    return [l.to_dict() for l in _project(root).list_layouts()]
+    return [lay.to_dict() for lay in _project(root).list_layouts()]
 
 
 @mcp.tool()
