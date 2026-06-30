@@ -38,19 +38,26 @@ mistaken for vanilla behavior and each ROM stands alone.
 
 ## Usage
 
-1. Launch mGBA with a ROM.
+1. Launch mGBA with a ROM (or pass `--rom path.gba` below to launch it for you;
+   `--mgba` / `$MGBA` overrides the binary, else it auto-detects).
 2. Open `Tools > Scripting…`. In the console, load the server **once**:
    ```
-   dofile("/abs/path/to/playtester/porygon_io_server.lua")
+   dofile("/path/to/playtester/porygon_io_server.lua")
    ```
    You should see `porygon-io v2: listening on port 8888`. This survives ROM
    swaps (File > Load ROM), so it only needs loading once per mGBA launch.
-3. Drive it:
+   (mGBA 0.10.x has no `--script` CLI flag, so this one load is manual.)
+3. Drive it — nothing is hardcoded; pass what you need:
    ```bash
    cd playtester
-   python3 games/pokeemerald_platinum/profile.py   # fresh reset -> first manual movement
-   python3 runner.py                                # walk the full span manifest
+   # fresh reset -> first manual movement
+   python3 games/pokeemerald_platinum/profile.py
+   # launch a ROM, custom port, override the player-object address:
+   python3 games/pokeemerald_platinum/profile.py --rom ~/roms/platinum.gba --port 8888 --obj 0x02001678
+   # walk a full span manifest (replay + agent spans)
+   python3 runner.py --manifest games/pokeemerald_platinum/manifest.json
    ```
+   Connection defaults also read `$PORYGON_PT_HOST` / `$PORYGON_PT_PORT`.
 
 ## Protocol (porygon_io_server.lua)
 

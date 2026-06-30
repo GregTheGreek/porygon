@@ -1,7 +1,7 @@
 """pokeemerald-platinum profile for the AI playtester.
 
-EVERYTHING in this file is specific to the pokeemerald-platinum ROM (the
-Sinnoh remake hack, ~/Desktop/pokeemerald.gba in dev), NOT vanilla Emerald:
+EVERYTHING in this file is specific to the pokeemerald-platinum ROM (a Sinnoh
+remake hack), NOT vanilla Emerald:
 
   * PLAYER_OBJ: gObjectEvents[player] lives at a different EWRAM address than
     vanilla/modern pokeemerald (which is 0x02006620). Found by EWRAM scan
@@ -40,7 +40,7 @@ DIALOGUE_GAP = 36
 CHECKPOINT_DIR = Path(__file__).resolve().parent / "checkpoints"
 
 
-def intro_to_first_move(e: Emu, verbose: bool = True) -> dict:
+def intro_to_first_move(e: Emu, verbose: bool = True, obj: int = PLAYER_OBJ) -> dict:
     """Drive a fresh game from RESET to first manual player control.
 
     Deterministic: the intro dialogue is fixed, presses are frame-synced, and
@@ -52,7 +52,7 @@ def intro_to_first_move(e: Emu, verbose: bool = True) -> dict:
         if verbose:
             print(*a)
 
-    e.set_obj(PLAYER_OBJ)
+    e.set_obj(obj)
     log("reset…");          e.reset(); e.wait_frames(150)
     log("skip intro…");     [e.press_f("START", 6, 24) for _ in range(6)]
     log("new game…");       e.press_f("A", 6, 30)
@@ -85,15 +85,26 @@ def verify_first_movement(e: Emu) -> dict:
 
 
 if __name__ == "__main__":
-    e = Emu()
+    import argparse
+    import emu as emu_mod
+
+    ap = argparse.ArgumentParser(description="Drive pokeemerald-platinum from reset to first movement.")
+    emu_mod.add_connection_args(ap)
+    ap.add_argument("--obj", type=lambda s: int(s, 0), default=PLAYER_OBJ,
+                    help="gObjectEvents[player] address (default 0x%X)" % PLAYER_OBJ)
+    ap.add_argument("--checkpoint", default=str(CHECKPOINT_DIR / "00_first_movement.ss"),
+                    help="where to save the first-movement savestate")
+    args = ap.parse_args()
+
+    e = emu_mod.connect(args)
     print("ping:", e.ping())
-    st = intro_to_first_move(e)
+    st = intro_to_first_move(e, obj=args.obj)
     print("first-movement state:", st)
     # Save the checkpoint while the player is idle, BEFORE moving. Savestates
     # captured mid-step resume in an input-locked transient that won't accept
     # input on load, so let the avatar settle first.
     e.wait_frames(30)
-    CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
-    print("save checkpoint:", e.save(str(CHECKPOINT_DIR / "00_first_movement.ss")))
+    os.makedirs(os.path.dirname(args.checkpoint), exist_ok=True)
+    print("save checkpoint:", e.save(args.checkpoint))
     # Movement verification runs last (it moves the player off the saved tile).
     print("movement check:", verify_first_movement(e))
