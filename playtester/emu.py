@@ -86,6 +86,38 @@ class Emu:
     def eval(self, lua: str) -> str:
         return self.cmd(f"EVAL {lua}")
 
+    # --- record / replay --------------------------------------------------
+    def rec_start(self) -> int:
+        """Begin recording the GBA key mask (logged on every change)."""
+        return int(self.cmd("RECSTART").split()[-1])
+
+    def rec_stop(self) -> int:
+        """Stop recording; returns the number of logged key-changes."""
+        return int(self.cmd("RECSTOP").split()[-1])
+
+    def rec_dump(self) -> list[list[int]]:
+        """Fetch the recording as [[frame_offset, key_mask], ...]."""
+        body = self.cmd("RECDUMP")
+        out = []
+        for tok in filter(None, body.split(",")):
+            df, k = tok.split(":")
+            out.append([int(df), int(k)])
+        return out
+
+    def replay(self, events: list[list[int]], poll: float = 0.1) -> None:
+        """Schedule a frame-accurate input replay and block until it finishes.
+
+        `events` is [[frame_offset, key_mask], ...] as produced by rec_dump.
+        Replay runs at emulator speed (real time); the player must be at the
+        same state the recording started from (load that checkpoint first).
+        """
+        data = ",".join(f"{df}:{k}" for df, k in events)
+        n = int(self.cmd(f"REPLAY {data}").split()[-1])
+        if n == 0:
+            return
+        while self.cmd("REPDONE") == "0":
+            time.sleep(poll)
+
     # --- frame-synced (deterministic) timing ------------------------------
     def frame(self) -> int:
         return int(self.eval("return emu:currentFrame()").split()[-1])

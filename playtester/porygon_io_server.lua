@@ -20,6 +20,11 @@
 --   RESET                -> OK    (emu:reset -> back to boot/title)
 --   SETOBJ 0xADDR        -> OK    (override gObjectEvents[0] base for this build)
 --   EVAL <lua>           -> OK <result> | ERR <msg>   (dev escape hatch)
+--   RECSTART             -> OK <f0>   (record GBA key mask on every change)
+--   RECSTOP              -> OK <count>
+--   RECDUMP              -> "df:k,df:k,..."  (key-changes relative to f0)
+--   REPLAY df:k,df:k,... -> OK <n>     (frame-accurate input replay)
+--   REPDONE              -> 1 if replay finished/idle, else 0
 
 porygon = porygon or {}
 local P = porygon
@@ -29,6 +34,10 @@ P.OBJ = P.OBJ or 0x02006620        -- gObjectEvents[0]; override per-build with 
 P.clients = P.clients or {}
 P.nextId = P.nextId or 1
 P.hold = P.hold or nil
+P.rec = P.rec or {}          -- recorded {f,k} key-change log
+P.recording = P.recording or false
+P.recF0 = P.recF0 or 0
+P.rep = P.rep or nil         -- active replay {ev={{df,k}..}, i, f0}
 
 local OFF_MAPNUM, OFF_MAPGROUP = 0x09, 0x0A
 local OFF_X, OFF_Y, OFF_FACING = 0x10, 0x12, 0x18
@@ -52,6 +61,17 @@ end
 
 -- Dispatched through P so re-dofile redefinitions take effect on the live callback.
 P.on_frame = function()
+  -- Replay takes precedence: apply every scheduled key-change whose frame
+  -- offset has passed (last one wins for this frame), then idle when done.
+  local R = P.rep
+  if R then
+    local df = emu:currentFrame() - R.f0
+    while R.i <= #R.ev and R.ev[R.i][1] <= df do
+      emu:setKeys(R.ev[R.i][2]); R.i = R.i + 1
+    end
+    if R.i > #R.ev then emu:setKeys(0); P.rep = nil end
+    return
+  end
   local h = P.hold
   if h then
     if h.frames > 0 then
@@ -110,6 +130,30 @@ P.handle = function(line)
     local ok, res = pcall(fn)
     if not ok then return "ERR " .. tostring(res) end
     return "OK " .. tostring(res)
+  -- --- record / replay ---------------------------------------------------
+  elseif cmd == "RECSTART" then
+    P.rec = {}; P.recording = true; P.recF0 = emu:currentFrame()
+    return "OK " .. P.recF0
+  elseif cmd == "RECSTOP" then
+    P.recording = false; return "OK " .. #P.rec
+  elseif cmd == "RECDUMP" then
+    -- "df:k,df:k,..." relative to recF0 (the recorded key-change log)
+    local s = {}
+    for i = 1, #P.rec do
+      s[#s + 1] = string.format("%d:%d", P.rec[i].f - P.recF0, P.rec[i].k)
+    end
+    return table.concat(s, ",")
+  elseif cmd == "REPLAY" then
+    -- rest = "df:k,df:k,..." ; schedules a frame-accurate input replay
+    local ev = {}
+    for df, k in rest:gmatch("(%d+):(%d+)") do
+      ev[#ev + 1] = { tonumber(df), tonumber(k) }
+    end
+    if #ev == 0 then return "ERR no events" end
+    P.rep = { ev = ev, i = 1, f0 = emu:currentFrame() }
+    return "OK " .. #ev
+  elseif cmd == "REPDONE" then
+    return P.rep and "0" or "1"   -- 1 == finished/idle
   end
   return "ERR unknown " .. cmd
 end
@@ -146,6 +190,21 @@ end
 if not P.frameHooked then
   callbacks:add("frame", function() if P.on_frame then P.on_frame() end end)
   P.frameHooked = true
+end
+
+-- Register the input recorder once; logs the GBA key mask on every change
+-- while P.recording, as {f=frame, k=mask}. Used by RECSTART/RECSTOP/RECDUMP.
+if not P.recHooked then
+  callbacks:add("keysRead", function()
+    if P.recording then
+      local k = emu:getKeys()
+      local r = P.rec
+      if #r == 0 or r[#r].k ~= k then
+        r[#r + 1] = { f = emu:currentFrame(), k = k }
+      end
+    end
+  end)
+  P.recHooked = true
 end
 
 -- (Re)bind the listening socket; close any prior one from an earlier dofile.
