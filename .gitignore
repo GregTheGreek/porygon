@@ -11,5 +11,9 @@ build/
 
 # uv: lockfile IS committed (it pins the full transitive dependency tree).
 
+# Emulator savestates: ROM-derived binary state (mGBA stores them as PNGs with
+# embedded state). Generated locally by the playtester; never commit them.
+*.ss
+
 # OS
 .DS_Store

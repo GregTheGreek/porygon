@@ -1,9 +1,7 @@
 """Test fixtures. Real-project tests run against a local pokeemerald checkout.
 
-Resolution order for the project root:
-  1. POKEEMERALD_ROOT env var
-  2. the known local checkout path
-If neither exists, real-project tests are skipped (unit tests still run).
+Set POKEEMERALD_ROOT to point at your checkout. If it is unset (or missing),
+real-project tests are skipped and the unit tests still run.
 """
 
 import os
@@ -13,15 +11,11 @@ import pytest
 
 from porygon.core.project import Project
 
-_FALLBACK = Path.home() / "code/github.com/GregTheGreek/pokeemerald"
-
 
 def _root() -> Path | None:
     env = os.environ.get("POKEEMERALD_ROOT")
     if env and Path(env).exists():
         return Path(env)
-    if _FALLBACK.exists():
-        return _FALLBACK
     return None
 
 

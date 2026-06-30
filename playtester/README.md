@@ -21,9 +21,13 @@ playtester/
     pokeemerald_platinum/      # self-contained per-game package
       profile.py               # addresses + intro sequence (BUILD-SPECIFIC)
       manifest.json            # ordered spans (paths relative to this dir)
-      checkpoints/             # 00_..ss .. 04_..ss (numbered = chronological)
+      checkpoints/             # *.ss savestates - generated locally, gitignored
       recordings/              # 01_..json .. 04_..json
 ```
+
+Savestates (`*.ss`) are **not committed** - they are ROM-derived binary state.
+Running the manifest regenerates them from your own ROM (the `intro` span
+creates the first checkpoint and the replay spans chain the rest).
 
 Generic code at the root (transport, primitives, frame-synced timing, the EWRAM
 player scan, the span runner) is build-agnostic. Everything ROM-specific (player

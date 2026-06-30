@@ -1,0 +1,4 @@
+# Savestates (*.ss) are generated locally and gitignored - they are ROM-derived
+# binary state and must not be committed. Run the manifest against your own ROM
+# to (re)generate the checkpoints this package's manifest.json references:
+#   python3 runner.py --manifest games/pokeemerald_platinum/manifest.json
