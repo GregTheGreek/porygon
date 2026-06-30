@@ -35,17 +35,31 @@ skills/           workflow skills (debug-loop, event-scripting)
 agents/           build-doctor, script-doctor
 commands/         /em-build, /em-debug, /em-script
 porymap-scripts/  JS bridge loaded via Porymap Options -> Custom Scripts
+playtester/       experimental: drive mGBA from an agent over a Lua socket bridge
 templates/        CLAUDE.md to drop into a pokeemerald checkout
 ```
 
-## Status
+## Capabilities
 
-- **Phase 0 (foundation)** - binary codecs, project parsing, MCP server + CLI, byte-identical round-trip tests.
-- **Phase 1 (build/debug loop)** - toolchain-agnostic `build`, compiler-error parsing, and symbol/crash-address resolution (function names from the symbol table; source `file:line` via DWARF when built with `DINFO=1`), plus a thin mGBA launch/GDB helper. `debug-loop` skill + `build-doctor` agent.
-- **Phase 2 (event scripting)** - map.json ↔ scripts.inc cross-ref validation (dangling labels, undefined constants), structured event editing (add/remove NPCs/signs/triggers), `.inc` scaffolding, macro-vocabulary lookup, and detected-optional Poryscript compile. Adaptive to hand-written `.inc` or Poryscript. `event-scripting` skill + `script-doctor` agent.
-- **Phase 4 (map wiring)** - the navigation plumbing that ties maps together: `add_warp` (doors/exits, validating the destination map exists and `dest_warp_id` indexes a real warp), `get_connections` / `edit_connection` (stitch N/S/E/W/dive/emerge neighbours, with offset and dest-map validation), `set_map_properties` (weather, music, map_type, battle_scene, and flags - rejecting unknown/structural keys), and `add_bg_event` for the full bg vocabulary (signs, hidden items, secret-base entrances; fork-custom types pass through). All are minimal-diff `map.json` edits with round-trip tests.
+- **Build & debug** - toolchain-agnostic `build` (stock `make` / `make modern`),
+  compiler-error parsing to `file:line`, and symbol/crash-address resolution
+  (function names from the symbol table; source `file:line` via DWARF when built
+  with `DINFO=1`), plus a thin mGBA launch/GDB helper. Driven by the `debug-loop`
+  skill and `build-doctor` agent.
+- **Event scripting** - `map.json` ↔ `scripts.inc` cross-ref validation (dangling
+  labels, undefined constants), structured event editing (add/remove NPCs, signs,
+  triggers), `.inc` scaffolding, macro-vocabulary lookup, and optional Poryscript
+  compile when it's available. Adapts to hand-written `.inc` or Poryscript.
+  `event-scripting` skill + `script-doctor` agent.
+- **Map wiring** - the navigation plumbing that ties maps together: `add_warp`
+  (doors/exits, validating the destination map exists and `dest_warp_id` indexes a
+  real warp), `get_connections` / `edit_connection` (stitch N/S/E/W/dive/emerge
+  neighbours, with offset and dest-map validation), `set_map_properties` (weather,
+  music, map_type, battle_scene, flags - rejecting unknown/structural keys), and
+  `add_bg_event` (signs, hidden items, secret-base entrances; fork-custom types
+  pass through). All minimal-diff `map.json` edits with round-trip tests.
 
-Together these cover the workflows the toolkit set out to augment: **debug, scripting**, and the **map wiring** that connects maps. (Earlier image→map phases were removed to keep porygon focused on the debugging and scripting loop.)
+Works with stock pokeemerald and pokeemerald-expansion forks (e.g. platinum).
 
 ## Quickstart
 
