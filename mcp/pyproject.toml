@@ -1,7 +1,7 @@
 [project]
 name = "porygon"
 version = "0.3.0"
-description = "Deterministic primitives for AI-augmented pokeemerald ROM hacking (binary blockdata I/O, project parsing, build/debug, image pipeline)."
+description = "Deterministic primitives for AI-augmented pokeemerald ROM hacking (binary blockdata I/O, project parsing, build/debug, event scripting, map wiring)."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -10,15 +10,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Pulled in for the image pipeline (Phase 3+). Kept optional so the foundation
-# (binary I/O + project parsing) installs with no native/image deps.
-imaging = [
-    "Pillow==12.2.0",
-    # numpy resolves to different exact versions per Python (2.2.6/2.4.6/2.5.0);
-    # a floor keeps it installable across requires-python, and uv.lock pins the
-    # exact version chosen for each interpreter.
-    "numpy>=2.2.6",
-]
 dev = [
     "pytest==9.1.1",
 ]
