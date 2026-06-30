@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -59,14 +60,14 @@ class Runner:
         scripts: Optional[dict[str, Callable[[Emu], dict]]] = None,
         agent_fn: AgentFn = _stub_agent,
         base_dir: Optional[str] = None,
-        shot_dir: str = "/tmp",
+        shot_dir: Optional[str] = None,
     ):
         self.e = emu
         self.manifest = json.load(open(manifest_path))
         self.base = Path(base_dir or os.path.dirname(os.path.abspath(manifest_path)))
         self.scripts = scripts or {}
         self.agent_fn = agent_fn
-        self.shot_dir = shot_dir
+        self.shot_dir = shot_dir or tempfile.gettempdir()
         obj = self.manifest.get("player_obj")
         if obj:
             self.e.set_obj(int(obj, 16) if isinstance(obj, str) else obj)
@@ -125,19 +126,32 @@ class Runner:
 
 
 if __name__ == "__main__":
+    import argparse
     import importlib.util
 
+    import emu as emu_mod
+
     here = os.path.dirname(os.path.abspath(__file__))
-    game_dir = os.path.join(here, "games", "pokeemerald_platinum")
-    spec = importlib.util.spec_from_file_location("profile", os.path.join(game_dir, "profile.py"))
+    default_manifest = os.path.join(here, "games", "pokeemerald_platinum", "manifest.json")
+
+    ap = argparse.ArgumentParser(description="Walk a span manifest (replay + agent spans).")
+    emu_mod.add_connection_args(ap)
+    ap.add_argument("--manifest", default=default_manifest, help="path to a span manifest.json")
+    ap.add_argument("--shot-dir", default=None, help="where agent-span screenshots go (default: OS temp)")
+    args = ap.parse_args()
+
+    # Load the profile that sits next to the manifest, for its `script` spans.
+    game_dir = os.path.dirname(os.path.abspath(args.manifest))
+    spec = importlib.util.spec_from_file_location("game_profile", os.path.join(game_dir, "profile.py"))
     P = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(P)
 
-    e = Emu()
+    e = emu_mod.connect(args)
     runner = Runner(
         e,
-        manifest_path=os.path.join(game_dir, "manifest.json"),
+        manifest_path=args.manifest,
         scripts={"intro_to_first_move": P.intro_to_first_move},
+        shot_dir=args.shot_dir,
         # agent_fn=<wire Claude or a policy here>,
     )
     for span_id, ok in runner.run():

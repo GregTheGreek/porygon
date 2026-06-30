@@ -1,16 +1,56 @@
 """Build-agnostic client for the porygon_io_server Lua socket (see
 porygon_io_server.lua). Pure transport + primitives; nothing here is specific
-to any ROM. ROM-specific addresses and intro sequences live in their own
-profile modules (e.g. pokeemerald_platinum.py).
+to any ROM or to any machine. ROM-specific addresses and intro sequences live
+in their own profile modules (e.g. games/<rom>/profile.py).
 """
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import socket
+import subprocess
 import time
 from pathlib import Path
 
-HOST, PORT = "127.0.0.1", 8888
+# Defaults; override per call (Emu(host=, port=)) or via env. No machine paths.
+HOST = os.environ.get("PORYGON_PT_HOST", "127.0.0.1")
+PORT = int(os.environ.get("PORYGON_PT_PORT", "8888"))
+
+
+def find_mgba(mgba: str | None = None) -> str | None:
+    """Locate an mGBA binary: explicit arg, then $MGBA, macOS .app, then PATH."""
+    for cand in (mgba, os.environ.get("MGBA"),
+                 "/Applications/mGBA.app/Contents/MacOS/mGBA"):
+        if cand and (os.path.isabs(cand) and os.path.exists(cand) or shutil.which(cand)):
+            return cand if os.path.exists(cand) else shutil.which(cand)
+    for name in ("mgba-qt", "mgba"):
+        found = shutil.which(name)
+        if found:
+            return found
+    return None
+
+
+def launch_mgba(rom: str, mgba: str | None = None) -> subprocess.Popen:
+    """Launch mGBA on a ROM. The Lua server still must be loaded once by hand
+    (Tools > Scripting -> dofile), since 0.10.x has no --script CLI flag."""
+    exe = find_mgba(mgba)
+    if not exe:
+        raise FileNotFoundError("mGBA not found; pass --mgba or set $MGBA")
+    if not os.path.exists(rom):
+        raise FileNotFoundError(f"ROM not found: {rom}")
+    return subprocess.Popen([exe, rom])
+
+
+def wait_for_server(host: str = HOST, port: int = PORT, timeout: float = 120.0) -> "Emu":
+    """Block until the Lua server accepts a connection (e.g. after a manual load)."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            return Emu(host, port)
+        except OSError:
+            time.sleep(1.0)
+    raise TimeoutError(f"no porygon-io server on {host}:{port} within {timeout}s")
 
 
 class Emu:
@@ -162,3 +202,22 @@ class Emu:
             a, x, y, fc = tok.split(",")
             rows.append({"addr": int(a, 16), "x": int(x), "y": int(y), "facing": int(fc)})
         return rows
+
+
+# --- CLI helpers (shared by runnable scripts) ----------------------------
+def add_connection_args(parser) -> None:
+    """Register the connection/launch flags every runnable script accepts."""
+    parser.add_argument("--host", default=HOST, help="server host (default %(default)s)")
+    parser.add_argument("--port", type=int, default=PORT, help="server port (default %(default)s)")
+    parser.add_argument("--rom", help="launch mGBA on this ROM first (Lua server still loaded by hand)")
+    parser.add_argument("--mgba", help="mGBA binary path (else auto-detect / $MGBA)")
+
+
+def connect(args) -> "Emu":
+    """Build an Emu from parsed args, optionally launching mGBA on --rom first."""
+    if getattr(args, "rom", None):
+        launch_mgba(args.rom, getattr(args, "mgba", None))
+        print(f"launched mGBA on {args.rom}; load the Lua server "
+              "(Tools > Scripting -> dofile), waiting for it…")
+        return wait_for_server(args.host, args.port)
+    return Emu(args.host, args.port)
