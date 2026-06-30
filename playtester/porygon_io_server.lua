@@ -32,6 +32,7 @@ local P = porygon
 P.PORT = P.PORT or 8888
 P.OBJ = P.OBJ or 0x02006620        -- gObjectEvents[0]; override per-build with SETOBJ
 P.clients = P.clients or {}
+P.buf = P.buf or {}           -- per-client receive buffer (reassembles long lines)
 P.nextId = P.nextId or 1
 P.hold = P.hold or nil
 P.rec = P.rec or {}          -- recorded {f,k} key-change log
@@ -164,12 +165,19 @@ local function on_received(id)
   while true do
     local p, err = sock:receive(1024)
     if p then
-      for ln in p:gmatch("[^\r\n]+") do
-        sock:send(P.handle(ln) .. "\n")
+      -- Accumulate and only dispatch complete (newline-terminated) lines, so a
+      -- command larger than the 1024-byte read (e.g. REPLAY) is reassembled.
+      P.buf[id] = (P.buf[id] or "") .. p
+      while true do
+        local nl = P.buf[id]:find("\n")
+        if not nl then break end
+        local ln = P.buf[id]:sub(1, nl - 1):gsub("\r$", "")
+        P.buf[id] = P.buf[id]:sub(nl + 1)
+        if #ln > 0 then sock:send(P.handle(ln) .. "\n") end
       end
     else
       if err ~= socket.ERRORS.AGAIN then
-        P.clients[id] = nil; sock:close()
+        P.clients[id] = nil; P.buf[id] = nil; sock:close()
       end
       return
     end
