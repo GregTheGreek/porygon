@@ -1,0 +1,52 @@
+name: Release Please
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    name: Release PR / tag
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.rp.outputs.release_created }}
+      pr: ${{ steps.rp.outputs.pr }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: rp
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  # release-please force-updates its release-PR branch on every push to main,
+  # which drops any extra commits. So re-sync uv.lock to the bumped version on
+  # the PR branch in the same run, every time the PR is (re)opened/updated.
+  sync-lock:
+    name: Sync uv.lock on release PR
+    needs: release-please
+    if: ${{ needs.release-please.outputs.pr }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ fromJSON(needs.release-please.outputs.pr).headBranchName }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: astral-sh/setup-uv@v5
+      - name: Regenerate lockfile for the bumped version
+        working-directory: mcp
+        run: uv lock
+      - name: Commit lockfile if it changed
+        run: |
+          if ! git diff --quiet -- mcp/uv.lock; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add mcp/uv.lock
+            git commit -m "chore: sync uv.lock to release version"
+            git push
+          else
+            echo "uv.lock already in sync."
+          fi
