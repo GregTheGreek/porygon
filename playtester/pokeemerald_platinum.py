@@ -83,6 +83,11 @@ if __name__ == "__main__":
     print("ping:", e.ping())
     st = intro_to_first_move(e)
     print("first-movement state:", st)
-    print("movement check:", verify_first_movement(e))
+    # Save the checkpoint while the player is idle, BEFORE moving. Savestates
+    # captured mid-step resume in an input-locked transient that won't accept
+    # input on load, so let the avatar settle first.
+    e.wait_frames(30)
     CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
     print("save checkpoint:", e.save(str(CHECKPOINT_DIR / "first_movement.ss")))
+    # Movement verification runs last (it moves the player off the saved tile).
+    print("movement check:", verify_first_movement(e))
