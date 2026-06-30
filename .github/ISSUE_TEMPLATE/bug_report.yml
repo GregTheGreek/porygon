@@ -38,7 +38,7 @@ body:
     attributes:
       label: Environment
       description: OS, Python version, porygon version (`uv run porygon --version` or plugin version).
-      placeholder: "macOS 14, Python 3.12, porygon 0.3.0"
+      placeholder: "macOS 14, Python 3.12, porygon 0.1.0"
     validations:
       required: false
   - type: textarea
