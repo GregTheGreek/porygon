@@ -4,7 +4,6 @@ import pytest
 
 from porygon.core.diagnostics import SymbolResolver, parse_build_errors
 
-
 # --- error parsing: pure unit, no toolchain -----------------------------
 
 def test_parse_gcc_error_with_column():
