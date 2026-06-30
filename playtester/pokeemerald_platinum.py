@@ -88,6 +88,6 @@ if __name__ == "__main__":
     # input on load, so let the avatar settle first.
     e.wait_frames(30)
     CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
-    print("save checkpoint:", e.save(str(CHECKPOINT_DIR / "first_movement.ss")))
+    print("save checkpoint:", e.save(str(CHECKPOINT_DIR / "00_first_movement.ss")))
     # Movement verification runs last (it moves the player off the saved tile).
     print("movement check:", verify_first_movement(e))
