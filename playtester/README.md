@@ -53,7 +53,7 @@ mistaken for vanilla behavior and each ROM stands alone.
    # fresh reset -> first manual movement
    python3 games/pokeemerald_platinum/profile.py
    # launch a ROM, custom port, override the player-object address:
-   python3 games/pokeemerald_platinum/profile.py --rom ~/roms/platinum.gba --port 8888 --obj 0x02001678
+   python3 games/pokeemerald_platinum/profile.py --rom /path/to/platinum.gba --port 8888 --obj 0x02001678
    # walk a full span manifest (replay + agent spans)
    python3 runner.py --manifest games/pokeemerald_platinum/manifest.json
    ```
