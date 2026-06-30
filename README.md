@@ -6,9 +6,12 @@
   </picture>
 </p>
 
-Tooling for **AI-augmented** pokeemerald decomp ROM hacking. It makes Claude a
-capable copilot for the workflows that matter - **debugging** and **writing event
-scripts** - while keeping a human in the loop. It is not an autonomous game builder.
+porygon is an **AI-first** toolkit for pokeemerald decomp ROM hacking. Describe the
+bug, the event, or the map connection you want, and let your agent do the fiddly
+decomp work - binary map I/O, build and crash debugging, event scripts, warps and
+connections - with byte-exact tooling underneath and you reviewing every change.
+It's **MCP-native**, so it works with any compatible agent, and ships a first-class
+Claude Code plugin. Not an autonomous game builder - you stay in the loop.
 
 The value is in the things an LLM can't do reliably by hand:
 
@@ -48,7 +51,10 @@ Together these cover the workflows the toolkit set out to augment: **debug, scri
 
 ```bash
 cd mcp && uv sync
-# point Claude Code at the plugin, then from a pokeemerald checkout:
+# Then either:
+#   - register the MCP server with your agent (command: `uv run python -m porygon.server`), or
+#   - install the Claude Code plugin (.claude-plugin/) for the turnkey experience.
+# From a pokeemerald checkout, the CLI works standalone too:
 uv run porygon info
 ```
 
