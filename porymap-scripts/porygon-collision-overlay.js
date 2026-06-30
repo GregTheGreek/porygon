@@ -1,8 +1,7 @@
 // porygon: collision overlay for Porymap
 //
 // Toggles a red overlay over every impassable block on the open map, so you can
-// review collision at a glance - handy after `porygon image-to-map`, whose
-// collision is a coarse suggestion you should confirm.
+// review collision at a glance after editing a map's blockdata.
 //
 // Load it in Porymap via: Options -> Custom Scripts... -> add this file.
 // Then use Tools -> "porygon: Toggle Collision Overlay" (Ctrl+Shift+C).

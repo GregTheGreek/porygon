@@ -18,7 +18,6 @@ from mcp.server.fastmcp import FastMCP
 
 from porygon.core import build as buildmod
 from porygon.core import emu as emumod
-from porygon.core import imaging as imagingmod
 from porygon.core import scripting as scriptmod
 from porygon.core.blockdata import Blockdata
 from porygon.core.diagnostics import SymbolResolver, parse_build_errors
@@ -324,80 +323,6 @@ def poryscript_status(root: Optional[str] = None) -> dict:
 def compile_poryscript(pory_path: str, inc_path: str, root: Optional[str] = None) -> dict:
     """Compile a .pory to a .inc (only if poryscript is available for this project)."""
     return scriptmod.compile_poryscript(_project(root), pory_path, inc_path)
-
-
-@mcp.tool()
-def porytiles_status(root: Optional[str] = None) -> dict:
-    """Report whether Porytiles (the tileset compiler) is installed + its version."""
-    return imagingmod.porytiles_status(_project(root))
-
-
-@mcp.tool()
-def validate_image(image_path: str, root: Optional[str] = None) -> dict:
-    """Check an image is usable for map generation (dims a multiple of 16px)."""
-    return imagingmod.validate_image(image_path)
-
-
-@mcp.tool()
-def image_to_map(image_path: str, name: str, full_auto: bool = False,
-                 root: Optional[str] = None) -> dict:
-    """Turn an image into a NEW tileset + NEW layout, reviewable in Porymap.
-
-    porygon dedups 16x16 cells + records placement; Porytiles compiles the tileset.
-    full_auto=False (default) leaves collision passable for human review; full_auto=True
-    applies a coarse collision suggestion. Requires Porytiles installed (check
-    porytiles_status first). Best for tile-aligned / pixel-art images; complex images
-    make Porytiles error on palette overflow (surfaced). The generated tileset is
-    viewable in Porymap but needs C registration to build into the ROM.
-    """
-    return imagingmod.image_to_map(_project(root), image_path, name, full_auto=full_auto)
-
-
-@mcp.tool()
-def list_tilesets(root: Optional[str] = None) -> list[dict]:
-    """List on-disk tilesets (folder, kind primary/secondary, metatile count).
-
-    Use this to pick an existing tileset ('asset pack') to recreate a map into with
-    image_to_existing_map - choose one whose art covers the source's terrain.
-    """
-    return _project(root).list_tilesets()
-
-
-@mcp.tool()
-def add_map(name: str, layout: str, map_id: Optional[str] = None,
-            group: Optional[str] = None, root: Optional[str] = None) -> dict:
-    """Create a walkable map: write data/maps/<name>/map.json and register it in
-    map_groups.json (the build auto-generates its MAP_ constant). layout must exist.
-    map_id defaults to MAP_<NAME_UPPER>.
-    """
-    project = _project(root)
-    mid = map_id or imagingmod.names_for(name)["map_id"]
-    path = project.add_map(mid, name, layout, group=group)
-    return {"written": str(path), "map": mid, "name": name}
-
-
-@mcp.tool()
-def image_to_existing_map(image_path: str, name: str,
-                          primary_tileset: str = "gTileset_General",
-                          secondary_tileset: Optional[str] = None,
-                          link_to: Optional[str] = None, link_dir: str = "left",
-                          link_offset: int = 0, link_kind: str = "connection",
-                          full_auto: bool = False, root: Optional[str] = None) -> dict:
-    """Recreate a map from an image using an EXISTING tileset, then register a walkable
-    map and (with link_to) wire it to a neighbour both ways so you can walk in and back.
-
-    Matches each 16x16 cell to the visually-closest metatile in primary_tileset (+
-    optional secondary). No Porytiles, no new tileset - because it references already-
-    registered tilesets, a normal `make` builds it into the ROM with no C edits. Returns
-    the new map id, a match_preview.png path, and a low-confidence-cell report to review
-    in Porymap. link_dir is the neighbour's direction from the new map.
-    """
-    return imagingmod.image_to_existing_map(
-        _project(root), image_path, name,
-        primary_tileset=primary_tileset, secondary_tileset=secondary_tileset,
-        link_to=link_to, link_dir=link_dir, link_offset=link_offset,
-        link_kind=link_kind, full_auto=full_auto,
-    )
 
 
 def main() -> None:
