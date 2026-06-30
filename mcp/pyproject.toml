@@ -1,6 +1,6 @@
 [project]
 name = "porygon"
-version = "0.1.0"
+version = "0.1.0" # x-release-please-version
 description = "Deterministic primitives for AI-augmented pokeemerald ROM hacking (binary blockdata I/O, project parsing, build/debug, event scripting, map wiring)."
 readme = "README.md"
 license = "Apache-2.0"

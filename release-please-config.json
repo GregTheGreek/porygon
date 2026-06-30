@@ -1,0 +1,17 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "last-release-sha": "f6a7639e005f8b50bdac2149f24a08b2d1abb49e",
+  "packages": {
+    ".": {
+      "release-type": "simple",
+      "package-name": "porygon",
+      "changelog-path": "CHANGELOG.md",
+      "include-component-in-tag": false,
+      "extra-files": [
+        { "type": "json", "path": ".claude-plugin/plugin.json", "jsonpath": "$.version" },
+        { "type": "json", "path": ".claude-plugin/marketplace.json", "jsonpath": "$.plugins[0].version" },
+        { "type": "generic", "path": "mcp/pyproject.toml" }
+      ]
+    }
+  }
+}
