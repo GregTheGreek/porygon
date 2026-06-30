@@ -35,6 +35,50 @@ binary/format work.
 - For map edits: use `porygon` to read/write `map.bin`, then have the human review in
   Porymap (the toolkit can drive a live preview via Porymap's custom-scripts bridge).
 
+## Diagnosing & fixing bugs
+
+- **Fix at the narrowest scope.** Runtime field bugs (warps, escape rope/dig, movement,
+  overworld effects) almost always live in **map data or map scripts**, not the shared
+  engine in `src/`. The engine encodes conventions that per-map data must satisfy - so a
+  map that misbehaves usually *violates a convention*, it doesn't expose an engine bug.
+  Diagnose by asking "which convention does this map break?" Fix in this order: map data
+  (collision/warps/events) → a per-map map script → and only edit shared `src/` as a last
+  resort (it runs for **every** map).
+- **Match vanilla precedent by archetype.** Before choosing a mechanism (which map-script
+  hook, which script command, which macro form), grep `data/maps` for existing usages and
+  copy the closest map of the **same archetype** (cave, town, harbor, gym, house...). The
+  same command is hooked differently by kind - e.g. `setescapewarp` runs from
+  `MAP_SCRIPT_ON_RESUME` in caves (CaveOfOrigin_Entrance, SeafloorCavern_Entrance) but from
+  `MAP_SCRIPT_ON_TRANSITION` in ferry/cable-car hubs (LilycoveCity_Harbor, SlateportCity_Harbor).
+- **Map-script hooks fire at different times - and re-firing hooks need idempotent scripts.**
+
+  | Hook | When it runs |
+  |------|------|
+  | `ON_LOAD` | when map tile data loads |
+  | `ON_TRANSITION` | once, during warp-in, before fade-in |
+  | `ON_WARP_INTO_MAP_TABLE` | on warp-in, var-gated (reposition objects) |
+  | `ON_FRAME_TABLE` | every frame, var-gated |
+  | `ON_RESUME` | on warp-in **and** every return-to-field (menu close, battle end) |
+
+  Scripts on re-firing hooks (`ON_RESUME`, `ON_FRAME_TABLE`) run repeatedly - write them
+  **idempotent**: use absolute setters (`setescapewarp MAP, x, y` to a fixed tile), never
+  relative mutations (a decrement drifts further on every re-fire). `ON_RESUME` is the
+  defensive "keep this state correct" choice; `ON_TRANSITION` is "set once on entry."
+
+## Gotchas
+
+- **Event-script macros are variadic - arg count changes their meaning.** Read the macro in
+  `asm/macros/event.inc` to confirm what a given arg count expands to; don't assume positional
+  meaning. E.g. `formatwarp`/`setescapewarp` with a trailing coord pair defaults `warpId` to
+  `WARP_ID_NONE` (lands on the literal tile); with one arg it's a warpId.
+- **`SaveBlock1` state persists across maps and save/reload.** Fields like `escapeWarp`
+  (used by Dig and Escape Rope), flags, and vars keep their value until something explicitly
+  overwrites them. Reason about lifetime when deciding whether/where state must be (re)set.
+- **`validate_scripts` has cross-file blind spots.** It flags `Common_EventScript_*` (defined
+  in shared files) as `dangling_label`, and map-header-referenced `*_MapScripts` labels as
+  `unused_label` - both are false positives. Trust the **build** as the source of truth for
+  linkage, not the validator's findings.
+
 ## porygon tools (MCP)
 
 Maps/data: `project_info`, `list_maps`, `list_layouts`, `get_layout`, `read_map`,
