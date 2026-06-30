@@ -7,7 +7,7 @@ changes; no native bindings to build.
 
 > Status: spike. Proven end-to-end on **pokeemerald-platinum** (the Sinnoh
 > remake hack) by driving a fresh game from reset to first manual movement,
-> fully autonomously. See `pokeemerald_platinum.py`.
+> fully autonomously. See `games/pokeemerald_platinum/`.
 
 ## Layout
 
@@ -15,16 +15,21 @@ changes; no native bindings to build.
 playtester/
   porygon_io_server.lua        # generic mGBA Lua command server (load once in mGBA)
   emu.py                       # generic, build-agnostic Python client + primitives
-  pokeemerald_platinum.py      # pokeemerald-platinum profile: addresses + intro sequence
-  checkpoints/
-    pokeemerald-platinum/
-      00_first_movement.ss     # mGBA savestate at first manual control (numbered = chronological)
+  runner.py                    # generic span runner (replay + agent spans)
+  README.md  MODEL.md
+  games/
+    pokeemerald_platinum/      # self-contained per-game package
+      profile.py               # addresses + intro sequence (BUILD-SPECIFIC)
+      manifest.json            # ordered spans (paths relative to this dir)
+      checkpoints/             # 00_..ss .. 04_..ss (numbered = chronological)
+      recordings/              # 01_..json .. 04_..json
 ```
 
-Generic code (transport, primitives, frame-synced timing, the EWRAM player
-scan) is build-agnostic. Anything ROM-specific (the player object address, the
-intro button sequence, timing constants, checkpoints) lives in a per-ROM
-profile module so it is never mistaken for vanilla behavior.
+Generic code at the root (transport, primitives, frame-synced timing, the EWRAM
+player scan, the span runner) is build-agnostic. Everything ROM-specific (player
+object address, intro sequence, timing constants, checkpoints, recordings,
+manifest) lives in a self-contained `games/<rom>/` package, so it is never
+mistaken for vanilla behavior and each ROM stands alone.
 
 ## Requirements
 
@@ -43,7 +48,8 @@ profile module so it is never mistaken for vanilla behavior.
 3. Drive it:
    ```bash
    cd playtester
-   python3 pokeemerald_platinum.py     # fresh reset -> first manual movement
+   python3 games/pokeemerald_platinum/profile.py   # fresh reset -> first manual movement
+   python3 runner.py                                # walk the full span manifest
    ```
 
 ## Protocol (porygon_io_server.lua)
@@ -77,6 +83,8 @@ Newline-terminated request → newline-terminated reply on TCP `127.0.0.1:8888`:
 
 ## Adding another ROM
 
-Copy `pokeemerald_platinum.py` to a new profile, then per build set `PLAYER_OBJ`
-(via `Emu.scan_player_object()` or the `.elf`), and re-calibrate the intro
-sequence — name-screen confirm behavior and dialogue length differ between hacks.
+Copy `games/pokeemerald_platinum/` to `games/<your_rom>/`, then in its
+`profile.py` set `PLAYER_OBJ` (via `Emu.scan_player_object()` or the `.elf`) and
+re-calibrate the intro sequence — name-screen confirm behavior and dialogue
+length differ between hacks. Record fresh checkpoints/recordings into that
+package and point its `manifest.json` at them.
