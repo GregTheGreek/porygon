@@ -11,10 +11,16 @@
     {
       "name": "porygon",
       "description": "Binary map I/O, build/debug loop, event scripting, and map wiring for pokeemerald. Augments the workflow; keeps a human in the loop.",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "source": "./",
       "category": "game-dev",
-      "tags": ["pokeemerald", "porymap", "rom-hacking", "gba", "decomp"]
+      "tags": [
+        "pokeemerald",
+        "porymap",
+        "rom-hacking",
+        "gba",
+        "decomp"
+      ]
     }
   ]
 }
