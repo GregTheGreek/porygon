@@ -7,7 +7,6 @@
   },
   "commands": "./commands",
   "skills": "./skills",
-  "agents": "./agents",
   "mcpServers": {
     "porygon": {
       "command": "uv",
