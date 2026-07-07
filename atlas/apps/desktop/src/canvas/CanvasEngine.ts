@@ -11,9 +11,15 @@ import {
   TilingSprite,
 } from 'pixi.js';
 import { drawGrid, type GridConfig } from './grid';
+import {
+  findSpawn,
+  resolveStep,
+  type Cell,
+  type Direction,
+} from './playSim';
 import type { CollisionValue } from '../lib/api';
 
-export type PaintMode = 'select' | 'collision' | 'occlusion';
+export type PaintMode = 'select' | 'collision' | 'occlusion' | 'play';
 
 export type CanvasCallbacks = {
   /** Current zoom as a percentage (100 = 1:1). */
@@ -80,6 +86,21 @@ const PLAYER_H = 32;
 const PLAYER_FILL = 0x3d7bff;
 const PLAYER_ALPHA = 0.85;
 
+// Play mode (M8): movement pacing. Chosen approximations tuned to feel like
+// Emerald's walking pace, not measured GBA frame counts.
+const WALK_MS = 250; // one 16px step
+const HOP_MS = 500; // a two-cell ledge hop
+const TURN_MS = 110; // a tap shorter than this turns in place without stepping
+const HOP_ARC_PX = 6; // peak lift of the hop arc (visual flourish, not physics)
+
+// Play-mode player sprite palette (programmatic, no asset files).
+const PLAYER_HAIR = 0x5a3a20;
+const PLAYER_SKIN = 0xf2c9a1;
+const PLAYER_EYE = 0x202020;
+const PLAYER_SHIRT = 0xc23b2e;
+const PLAYER_PANTS = 0x2f4f8f;
+const PLAYER_SHOE = 0x262626;
+
 const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
 
 // Decode an already-loaded image into raw RGBA pixels via an offscreen 2D
@@ -103,6 +124,66 @@ function collisionValueEq(
   return a === b;
 }
 
+// Play-mode movement keys: arrows by key, WASD by physical position (e.code)
+// so non-QWERTY layouts keep the WASD cluster.
+function keyToDirection(e: KeyboardEvent): Direction | null {
+  switch (e.key) {
+    case 'ArrowUp':
+      return 'north';
+    case 'ArrowDown':
+      return 'south';
+    case 'ArrowLeft':
+      return 'west';
+    case 'ArrowRight':
+      return 'east';
+  }
+  switch (e.code) {
+    case 'KeyW':
+      return 'north';
+    case 'KeyS':
+      return 'south';
+    case 'KeyA':
+      return 'west';
+    case 'KeyD':
+      return 'east';
+  }
+  return null;
+}
+
+// A programmatic 16x32 stand-in for Emerald's overworld player, built from
+// rects at (x, y) in artwork pixels: feet fill the bottom 16x16 cell, torso and
+// head rise one cell above it, with a little transparent headroom like the GBA
+// sprites. Facing shows in the face: eyes track east/west/south; north shows
+// the back of the head.
+function drawPlayerSprite(g: Graphics, x: number, y: number, facing: Direction): void {
+  // Hair.
+  g.rect(x + 3, y + 5, 10, 4).fill(PLAYER_HAIR);
+  g.rect(x + 2, y + 7, 12, 3).fill(PLAYER_HAIR);
+  // Face.
+  g.rect(x + 4, y + 9, 8, 5).fill(PLAYER_SKIN);
+  if (facing === 'north') {
+    g.rect(x + 4, y + 9, 8, 4).fill(PLAYER_HAIR);
+  } else if (facing === 'south') {
+    g.rect(x + 5, y + 10, 2, 2).fill(PLAYER_EYE);
+    g.rect(x + 9, y + 10, 2, 2).fill(PLAYER_EYE);
+  } else if (facing === 'west') {
+    g.rect(x + 4, y + 10, 2, 2).fill(PLAYER_EYE);
+  } else {
+    g.rect(x + 10, y + 10, 2, 2).fill(PLAYER_EYE);
+  }
+  // Torso and arms (hands in skin).
+  g.rect(x + 3, y + 14, 10, 8).fill(PLAYER_SHIRT);
+  g.rect(x + 1, y + 15, 2, 6).fill(PLAYER_SHIRT);
+  g.rect(x + 13, y + 15, 2, 6).fill(PLAYER_SHIRT);
+  g.rect(x + 1, y + 21, 2, 2).fill(PLAYER_SKIN);
+  g.rect(x + 13, y + 21, 2, 2).fill(PLAYER_SKIN);
+  // Legs and shoes.
+  g.rect(x + 4, y + 22, 3, 7).fill(PLAYER_PANTS);
+  g.rect(x + 9, y + 22, 3, 7).fill(PLAYER_PANTS);
+  g.rect(x + 3, y + 29, 4, 3).fill(PLAYER_SHOE);
+  g.rect(x + 9, y + 29, 4, 3).fill(PLAYER_SHOE);
+}
+
 /**
  * The PixiJS world for the Canvas. React owns only mounting and prop plumbing;
  * all rendering, zoom, pan, grid, and selection live here.
@@ -113,7 +194,8 @@ function collisionValueEq(
  *     world           - carries pan (position) + zoom (scale)
  *       sprite        - the artwork (child 0, below everything)
  *       occlusionTint - per-pixel occlusion tint (authoring aid)
- *       previewPlayer - the player-sized preview marker (below the top layer)
+ *       previewPlayer - the player layer: M7's cursor marker, or the play-mode
+ *                       player sprite (M8), always below the top layer
  *       previewTop    - real occluding artwork pixels, drawn over the player
  *     collisionLayer  - collision tint per 16px cell, screen space
  *     gridLayer       - grid lines, redrawn in screen space (crisp 1px)
@@ -171,6 +253,28 @@ export class CanvasEngine {
   private previewEnabled = false;
   // The grid cell (col,row) under the cursor for the preview marker; null hides.
   private previewCell: { col: number; row: number } | null = null;
+
+  // Play mode (M8). Everything here is ephemeral session state: it never
+  // touches the project store, so entering/leaving play changes no data and
+  // nothing lands in undo or autosave.
+  private playing = false;
+  private spawnCell: Cell = { col: 0, row: 0 };
+  private playerCell: Cell = { col: 0, row: 0 };
+  private facing: Direction = 'south';
+  // The in-flight step between two cells; null while standing.
+  private tween: {
+    from: Cell;
+    to: Cell;
+    startedAt: number;
+    duration: number;
+    hop: boolean;
+  } | null = null;
+  // Held movement keys in press order; the most recent one drives movement
+  // (no diagonal: exactly one direction is ever acted on).
+  private heldDirs: Direction[] = [];
+  // Until this timestamp a fresh direction only changes facing (tap-to-turn).
+  private turnUntil = 0;
+  private tickerAttached = false;
 
   // Active stroke: the pointer we captured, the layer it paints, and the cells
   // or pixels it actually changed.
@@ -293,9 +397,15 @@ export class CanvasEngine {
     // now being set, so draw it once the artwork size is known.
     this.drawCollisionLayer();
     this.refreshOcclusion();
+    // Switching objects while in play mode respawns the player on the new grid
+    // (enterPlay also covers the mount case where play mode was set before the
+    // artwork finished loading).
+    if (this.paintMode === 'play') this.enterPlay();
   }
 
   clearArtwork(): void {
+    // No artwork means nothing to play on; React resets the mode to 'select'.
+    if (this.playing) this.leavePlay();
     if (this.sprite) {
       this.world.removeChild(this.sprite);
       this.sprite.destroy();
@@ -330,10 +440,13 @@ export class CanvasEngine {
     this.drawCollisionLayer();
   }
 
-  /** Switch the brush between selection and collision painting. */
+  /** Switch between selection, the two paint brushes, and play mode. */
   setPaintMode(mode: PaintMode): void {
     if (this.paintMode === mode) return;
+    const wasPlaying = this.playing;
     this.paintMode = mode;
+    if (mode === 'play') this.enterPlay();
+    else if (wasPlaying) this.leavePlay();
     this.updateCursor();
   }
 
@@ -377,6 +490,176 @@ export class CanvasEngine {
   setAnchor(anchor: { x: number; y: number } | null): void {
     this.anchor = anchor;
     this.drawOverlay();
+  }
+
+  /** Return the play-mode player to its spawn cell. No data is touched. */
+  resetPlayer(): void {
+    if (!this.playing) return;
+    this.playerCell = { ...this.spawnCell };
+    this.facing = 'south';
+    this.tween = null;
+    this.drawPlayer();
+    this.centerCameraOnPlayer();
+  }
+
+  // --- Play mode (M8) ---
+
+  // Spawn (or respawn) the player and start the movement ticker. Safe to call
+  // again while already playing: switching objects re-runs the spawn rule.
+  private enterPlay(): void {
+    if (!this.sprite) return; // no artwork yet; loadArtwork retries
+    this.playing = true;
+    this.spawnCell = findSpawn(
+      this.collisionCells,
+      this.gridCols(),
+      this.gridRows(),
+      this.anchor,
+    );
+    this.playerCell = { ...this.spawnCell };
+    this.facing = 'south';
+    this.tween = null;
+    this.heldDirs = [];
+    // Force the above-player occlusion layer on while playing, regardless of
+    // the Preview toggle: play without the sandwich would lie about rendering.
+    this.refreshOcclusion();
+    this.drawPlayer();
+    this.centerCameraOnPlayer();
+    if (!this.tickerAttached) {
+      this.app.ticker.add(this.onTick);
+      this.tickerAttached = true;
+    }
+  }
+
+  private leavePlay(): void {
+    this.playing = false;
+    this.tween = null;
+    this.heldDirs = [];
+    if (this.tickerAttached) {
+      this.app.ticker.remove(this.onTick);
+      this.tickerAttached = false;
+    }
+    // Hand the shared player layer and the top layer back to the M7 preview.
+    this.refreshOcclusion();
+    this.drawPreviewPlayer();
+  }
+
+  private gridCols(): number {
+    return Math.ceil(this.artW / COLLISION_CELL);
+  }
+
+  private gridRows(): number {
+    return Math.ceil(this.artH / COLLISION_CELL);
+  }
+
+  // The per-frame movement loop, active only while playing. Advances the
+  // current tween and, once standing, starts the next step from held keys.
+  private onTick = (): void => {
+    if (!this.playing) return;
+    const now = performance.now();
+    if (this.tween) {
+      if (now - this.tween.startedAt >= this.tween.duration) {
+        this.playerCell = { ...this.tween.to };
+        this.tween = null;
+        // Chain the next step immediately so holding a key walks continuously;
+        // direction changes mid-walk flow without the standing turn pause.
+        this.tryStep(now, true);
+      }
+      this.drawPlayer();
+    } else {
+      this.tryStep(now, false);
+    }
+    this.centerCameraOnPlayer();
+  };
+
+  // Attempt one grid step in the most recently held direction. From a
+  // standstill, a direction change first turns in place (Emerald taps turn
+  // without stepping); mid-walk changes keep moving.
+  private tryStep(now: number, cameFromMotion: boolean): void {
+    const dir = this.heldDirs[this.heldDirs.length - 1];
+    if (!dir) return;
+    if (dir !== this.facing) {
+      this.facing = dir;
+      if (!cameFromMotion) {
+        this.turnUntil = now + TURN_MS;
+        this.drawPlayer();
+        return;
+      }
+    } else if (!cameFromMotion && now < this.turnUntil) {
+      return;
+    }
+    const outcome = resolveStep(
+      this.collisionCells,
+      this.gridCols(),
+      this.gridRows(),
+      this.playerCell,
+      dir,
+    );
+    if (outcome.kind === 'blocked') {
+      this.drawPlayer(); // facing may have changed against a wall
+      return;
+    }
+    this.tween = {
+      from: { ...this.playerCell },
+      to: { col: outcome.col, row: outcome.row },
+      startedAt: now,
+      duration: outcome.kind === 'hop' ? HOP_MS : WALK_MS,
+      hop: outcome.kind === 'hop',
+    };
+    this.drawPlayer();
+  }
+
+  // The player sprite's top-left in artwork pixels (interpolated during a
+  // tween) plus the hop lift. The sprite stands on its cell: feet fill the
+  // bottom 16px, head rises one cell above.
+  private playerRenderPos(): { x: number; y: number; lift: number } {
+    const topLeft = (c: Cell) => ({
+      x: c.col * COLLISION_CELL,
+      y: c.row * COLLISION_CELL - (PLAYER_H - COLLISION_CELL),
+    });
+    if (!this.tween) return { ...topLeft(this.playerCell), lift: 0 };
+    const t = clamp(
+      (performance.now() - this.tween.startedAt) / this.tween.duration,
+      0,
+      1,
+    );
+    const a = topLeft(this.tween.from);
+    const b = topLeft(this.tween.to);
+    const lift = this.tween.hop ? Math.sin(Math.PI * t) * HOP_ARC_PX : 0;
+    return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t, lift };
+  }
+
+  // Draw the play-mode player into the shared player layer. Its slot in
+  // `world` (above the artwork, below previewTop) is the occlusion sandwich:
+  // occluding pixels draw over the player, everything else behind it.
+  private drawPlayer(): void {
+    const g = this.previewPlayer;
+    g.clear();
+    if (!this.playing) {
+      g.visible = false;
+      return;
+    }
+    const pos = this.playerRenderPos();
+    drawPlayerSprite(g, pos.x, pos.y - pos.lift, this.facing);
+    g.visible = true;
+  }
+
+  // Keep the camera locked to the player (Emerald centers the view on the
+  // player; manual panning is disabled while playing, zoom is respected).
+  // Cheap no-op when nothing moved, so calling it every tick is fine.
+  private centerCameraOnPlayer(): void {
+    if (!this.playing) return;
+    const pos = this.playerRenderPos();
+    const scale = this.world.scale.x;
+    const cx = pos.x + PLAYER_W / 2;
+    const cy = pos.y + PLAYER_H - COLLISION_CELL / 2;
+    const nx = this.viewportW / 2 - cx * scale;
+    const ny = this.viewportH / 2 - cy * scale;
+    if (Math.abs(nx - this.world.x) < 0.01 && Math.abs(ny - this.world.y) < 0.01) {
+      return;
+    }
+    this.world.x = nx;
+    this.world.y = ny;
+    this.afterTransform();
   }
 
   /** Scale the artwork to fit the viewport (with padding) and center it. */
@@ -534,6 +817,7 @@ export class CanvasEngine {
     this.canvas.addEventListener('gesturechange', this.onGestureChange as EventListener);
     window.addEventListener('keydown', this.onKeyDown);
     window.addEventListener('keyup', this.onKeyUp);
+    window.addEventListener('blur', this.onWindowBlur);
   }
 
   private detachInput(): void {
@@ -546,6 +830,7 @@ export class CanvasEngine {
     this.canvas?.removeEventListener('gesturechange', this.onGestureChange as EventListener);
     window.removeEventListener('keydown', this.onKeyDown);
     window.removeEventListener('keyup', this.onKeyUp);
+    window.removeEventListener('blur', this.onWindowBlur);
   }
 
   private localPoint(e: { clientX: number; clientY: number }) {
@@ -566,12 +851,16 @@ export class CanvasEngine {
     const p = this.localPoint(e);
     if (e.ctrlKey || this.isMouseWheel(e)) {
       this.zoomAt(p.x, p.y, Math.exp(-e.deltaY * ZOOM_SENSITIVITY));
-    } else {
+    } else if (!this.playing) {
+      // The follow camera owns the view while playing; manual pan is disabled
+      // (zoom above still works - the next tick recenters on the player).
       this.panBy(-e.deltaX, -e.deltaY);
     }
   };
 
   private onPointerDown = (e: PointerEvent): void => {
+    // While playing the pointer is inert: no pan, no paint, no select.
+    if (this.playing) return;
     const panButton = e.button === 1 || (e.button === 0 && this.spaceDown);
     if (panButton) {
       this.panning = true;
@@ -608,8 +897,9 @@ export class CanvasEngine {
     if (this.painting && e.pointerId === this.paintPointerId) {
       this.paintAt(e);
     }
-    // Track the cursor cell so the preview marker follows the pointer.
-    if (this.previewEnabled) this.updatePreviewCell(e);
+    // Track the cursor cell so the preview marker follows the pointer (the
+    // play-mode player owns the shared layer, so skip while playing).
+    if (this.previewEnabled && !this.playing) this.updatePreviewCell(e);
   };
 
   private onPointerUp = (e: PointerEvent): void => {
@@ -688,6 +978,19 @@ export class CanvasEngine {
       }
       return;
     }
+    if (this.playing) {
+      const dir = keyToDirection(e);
+      if (dir) {
+        e.preventDefault();
+        if (!this.heldDirs.includes(dir)) this.heldDirs.push(dir);
+        return;
+      }
+      // Space must not start a pan while playing: the camera owns the view.
+      if (e.code === 'Space') {
+        e.preventDefault();
+        return;
+      }
+    }
     if (e.code === 'Space' && !this.spaceDown) {
       this.spaceDown = true;
       this.updateCursor();
@@ -695,10 +998,20 @@ export class CanvasEngine {
   };
 
   private onKeyUp = (e: KeyboardEvent): void => {
+    const dir = keyToDirection(e);
+    if (dir) this.heldDirs = this.heldDirs.filter((d) => d !== dir);
     if (e.code === 'Space') {
       this.spaceDown = false;
       this.updateCursor();
     }
+  };
+
+  // Losing window focus drops keyup events; clear held state so the player
+  // does not keep walking (and space does not stick) on return.
+  private onWindowBlur = (): void => {
+    this.heldDirs = [];
+    this.spaceDown = false;
+    this.updateCursor();
   };
 
   // Click empty space to deselect; click the artwork to select it.
@@ -815,7 +1128,9 @@ export class CanvasEngine {
   }
 
   private updateCursor(): void {
-    if (this.spaceDown) {
+    if (this.playing) {
+      this.setCursor('default');
+    } else if (this.spaceDown) {
       this.setCursor('grab');
     } else if (this.paintMode === 'collision' || this.paintMode === 'occlusion') {
       this.setCursor('crosshair');
@@ -855,9 +1170,10 @@ export class CanvasEngine {
     }
     // The preview's above-player layer is the real artwork pixels under the
     // mask - honest to compiler.md (occluding pixels -> top.png). A pixel that
-    // is transparent in the artwork stays transparent here.
+    // is transparent in the artwork stays transparent here. Play mode forces
+    // the layer on: the sandwich is what makes the runtime preview truthful.
     const art = this.artworkPixels;
-    if (hasArt && hasPixels && this.previewEnabled && art) {
+    if (hasArt && hasPixels && (this.previewEnabled || this.playing) && art) {
       this.previewTopTexture = this.textureFromMask((p, out) => {
         out[p] = art.data[p] ?? 0;
         out[p + 1] = art.data[p + 1] ?? 0;
@@ -893,7 +1209,9 @@ export class CanvasEngine {
 
   // Draw the player-sized preview marker in world space at the cursor cell. It
   // stands on the 16x16 cell (bottom) and rises one cell above it (16x32).
+  // While playing, the play-mode player owns this layer (see drawPlayer).
   private drawPreviewPlayer(): void {
+    if (this.playing) return;
     this.previewPlayer.clear();
     if (!this.sprite || !this.previewEnabled || !this.previewCell) {
       this.previewPlayer.visible = false;

@@ -13,8 +13,11 @@ export type CanvasArtwork = {
 
 // What the Canvas brush edits. Select is the default pointer behavior (pan,
 // zoom, pick); Collision paints on the 16px grid; Occlusion paints per pixel
-// (occlusion is pixel-level - see occlusion.rs / compiler.md).
-export type PaintMode = 'select' | 'collision' | 'occlusion';
+// (occlusion is pixel-level - see occlusion.rs / compiler.md). Play (M8) is
+// the runtime preview: a playable mode, not a brush - the pointer is inert and
+// the keyboard walks a player on the grid. Play state itself is ephemeral and
+// lives in the Canvas engine, never here or in the project.
+export type PaintMode = 'select' | 'collision' | 'occlusion' | 'play';
 
 // The occlusion brush size in artwork pixels (a centered square). Occlusion is
 // pixel-level, so a 1px brush is precise but slow; the larger sizes make broad

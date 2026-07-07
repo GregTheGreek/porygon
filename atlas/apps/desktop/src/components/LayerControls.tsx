@@ -1,13 +1,16 @@
 import { useCanvasStore } from '../store/canvas';
 import { CollisionControls } from './CollisionControls';
 import { OcclusionControls } from './OcclusionControls';
+import { PlayControls } from './PlayControls';
 import { ToolbarButton } from './ToolbarButton';
 
-// Canvas-toolbar controls for the paint layers. The three-way mode toggle
-// (Select / Collision / Occlusion) picks what left-drag paints; the two overlay
-// visibility toggles and the preview toggle are always available and independent
-// of the mode and of each other. The active mode's tools render inline after.
-export function LayerControls() {
+// Canvas-toolbar controls for the paint layers and the runtime preview. The
+// four-way mode toggle (Select / Collision / Occlusion / Play) picks what the
+// Canvas does; the two overlay visibility toggles and the preview toggle are
+// always available and independent of the mode and of each other. The active
+// mode's tools render inline after. `onResetPlay` reaches the Canvas engine
+// (play state is ephemeral, not store state).
+export function LayerControls({ onResetPlay }: { onResetPlay: () => void }) {
   const paintMode = useCanvasStore((s) => s.paintMode);
   const setPaintMode = useCanvasStore((s) => s.setPaintMode);
   const collisionVisible = useCanvasStore((s) => s.collisionVisible);
@@ -27,6 +30,13 @@ export function LayerControls() {
       </ToolbarButton>
       <ToolbarButton active={paintMode === 'occlusion'} onClick={() => setPaintMode('occlusion')}>
         Occlusion
+      </ToolbarButton>
+      <ToolbarButton
+        active={paintMode === 'play'}
+        title="Walk a player on the object's grid (arrows / WASD)"
+        onClick={() => setPaintMode('play')}
+      >
+        Play
       </ToolbarButton>
 
       <span className="mx-1 h-4 w-px bg-bg-border" />
@@ -55,6 +65,7 @@ export function LayerControls() {
 
       {paintMode === 'collision' && <CollisionControls />}
       {paintMode === 'occlusion' && <OcclusionControls />}
+      {paintMode === 'play' && <PlayControls onReset={onResetPlay} />}
     </div>
   );
 }

@@ -47,6 +47,7 @@ export function Canvas() {
       : NO_PIXELS,
   );
   const paintMode = useCanvasStore((s) => s.paintMode);
+  const setPaintMode = useCanvasStore((s) => s.setPaintMode);
   const collisionVisible = useCanvasStore((s) => s.collisionVisible);
   const paintValue = useCanvasStore((s) => s.paintValue);
   const occlusionVisible = useCanvasStore((s) => s.occlusionVisible);
@@ -141,6 +142,12 @@ export function Canvas() {
     else engine.clearArtwork();
   }, [artwork]);
 
+  // Play mode needs an object to play on: losing the artwork (deselect,
+  // delete) drops back to Select so the store and engine stay coherent.
+  useEffect(() => {
+    if (!artwork && paintMode === 'play') setPaintMode('select');
+  }, [artwork, paintMode, setPaintMode]);
+
   // Push grid toggles into the engine.
   useEffect(() => {
     engineRef.current?.setGrid({ show8, show16 });
@@ -194,7 +201,9 @@ export function Canvas() {
           <span className="font-medium uppercase tracking-wide text-fg-muted">
             Canvas
           </span>
-          {hasArtwork && <LayerControls />}
+          {hasArtwork && (
+            <LayerControls onResetPlay={() => engineRef.current?.resetPlayer()} />
+          )}
         </div>
         <div className="flex items-center gap-1 text-xs">
           <GridToggle label="8" title="Toggle 8px tile grid" active={show8} onClick={() => setShow8((v) => !v)} />
