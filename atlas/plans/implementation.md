@@ -164,6 +164,8 @@ Nothing more.
 
 ## End-to-End Proof
 
+**Status: DONE (2026-07-07).** Findings in `../spikes/spike0/FINDINGS.md`; `compiler.md` is at v1.0. Deferred confirmations (tracked as compiler.md Residual Risks): runtime occlusion visual in an emulator, and the in-app Porymap prefab check.
+
 **This is the first coding task. Not the app.**
 
 Hardcoded. Ugly. Disposable. Lives in `spikes/spike0/`, never imported by real code.
@@ -636,12 +638,10 @@ Every pull request should improve the product in a visible way.
 
 # Immediate Next Task
 
-**Spike 0. Not the app.**
+**Milestone 1: Project Skeleton.**
 
-Draft the constraint rules in `compiler.md` first, then use the spike to confirm or correct every one of them.
+Spike 0 is complete; `compiler.md` v1.0 is the contract the exporter (Milestone 10) implements.
 
-Do not start Milestone 1 until Spike 0's exit criteria are met.
-
-Once complete, continue sequentially through the roadmap.
+Continue sequentially through the roadmap.
 
 The implementation should continuously reflect the Atlas Bible rather than attempting to predict every future requirement.
