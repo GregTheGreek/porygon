@@ -37,6 +37,7 @@ commands/         /em-build, /em-debug, /em-script
 porymap-scripts/  JS bridge loaded via Porymap Options -> Custom Scripts
 playtester/       experimental: drive mGBA from an agent over a Lua socket bridge
 templates/        CLAUDE.md to drop into a pokeemerald checkout
+atlas/            in design: object authoring desktop app (codename Atlas, ships as Porygon) - see atlas/plans/
 ```
 
 ## Capabilities
