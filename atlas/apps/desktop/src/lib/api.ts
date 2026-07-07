@@ -1,8 +1,9 @@
 import { invoke } from '@tauri-apps/api/core';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 
-// Mirrors the serde structs in crates/atlas/src/object.rs. Anchor is snapped to
-// the 16px grid by Rust; the frontend never computes it.
+// Mirrors the serde structs in crates/atlas/src/object.rs. Anchor stays on the
+// 16px grid: Rust snaps the import default; Inspector edits snap in the store
+// via the same round-to-nearest rule (see snapToGrid in store/project.ts).
 export type Anchor = {
   x: number;
   y: number;
@@ -16,6 +17,8 @@ export type AtlasObject = {
   width: number;
   height: number;
   anchor: Anchor;
+  category: string;
+  tags: string[];
 };
 
 // Mirrors the serde structs in crates/atlas/src/project.rs. Rust owns the

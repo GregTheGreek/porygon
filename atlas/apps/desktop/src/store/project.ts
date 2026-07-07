@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import * as api from '../lib/api';
-import type { AtlasObject, OpenProject, Recent } from '../lib/api';
+import type { Anchor, AtlasObject, OpenProject, Recent } from '../lib/api';
 import { useCanvasStore } from './canvas';
 import { useHistory } from './history';
 
@@ -14,6 +14,14 @@ function fileStem(path: string): string {
   const base = path.split(/[\\/]/).pop() ?? 'Object';
   return base.replace(/\.png$/i, '') || 'Object';
 }
+
+// Mirrors `snap` in crates/atlas/src/object.rs: round a pixel coordinate to the
+// nearest 16px metatile-grid line (Rust integer division = floor for u32).
+const GRID = 16;
+const snapToGrid = (v: number) => Math.floor((v + GRID / 2) / GRID) * GRID;
+
+const clamp = (v: number, lo: number, hi: number) =>
+  Math.min(Math.max(v, lo), hi);
 
 type ProjectState = {
   open: OpenProject | null;
@@ -37,6 +45,12 @@ type ProjectState = {
   renameObject: (id: string, name: string) => void;
   duplicateObject: (id: string) => Promise<void>;
   deleteObject: (id: string) => Promise<void>;
+
+  // Inspector metadata edits (M5). All undoable.
+  setObjectCategory: (id: string, category: string) => void;
+  addObjectTag: (id: string, tag: string) => void;
+  removeObjectTag: (id: string, tag: string) => void;
+  setObjectAnchor: (id: string, x: number, y: number) => void;
 };
 
 export const useProjectStore = create<ProjectState>((set, get) => {
@@ -115,7 +129,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     }
   };
 
-  const setObjectName = (id: string, name: string) => {
+  const patchObject = (id: string, patch: Partial<AtlasObject>) =>
     set((s) =>
       s.open
         ? {
@@ -124,18 +138,44 @@ export const useProjectStore = create<ProjectState>((set, get) => {
               project: {
                 ...s.open.project,
                 objects: s.open.project.objects.map((o) =>
-                  o.id === id ? { ...o, name } : o,
+                  o.id === id ? { ...o, ...patch } : o,
                 ),
               },
             },
           }
         : s,
     );
+
+  const setObjectName = (id: string, name: string) => {
+    patchObject(id, { name });
     // Keep the Canvas label in sync when the shown object is renamed.
     const canvas = useCanvasStore.getState();
     if (get().selectedObjectId === id && canvas.artwork) {
       canvas.setArtwork({ ...canvas.artwork, name });
     }
+  };
+
+  // Shared shape of every metadata edit: apply, schedule the autosave, and
+  // push an undo command that re-applies or reverses the same patch.
+  const commitPatch = (
+    label: string,
+    id: string,
+    previous: Partial<AtlasObject>,
+    next: Partial<AtlasObject>,
+  ) => {
+    patchObject(id, next);
+    scheduleSave();
+    useHistory.getState().push({
+      label,
+      undo: () => {
+        patchObject(id, previous);
+        scheduleSave();
+      },
+      redo: () => {
+        patchObject(id, next);
+        scheduleSave();
+      },
+    });
   };
 
   // Leaving a project: drop objects, selection, undo history, and the Canvas.
@@ -345,6 +385,47 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       } catch (e) {
         set({ error: String(e) });
       }
+    },
+
+    setObjectCategory: (id, category) => {
+      const obj = get().open?.project.objects.find((o) => o.id === id);
+      if (!obj) return;
+      const next = category.trim();
+      if (next === obj.category) return;
+      commitPatch('Edit category', id, { category: obj.category }, { category: next });
+    },
+
+    addObjectTag: (id, tag) => {
+      const obj = get().open?.project.objects.find((o) => o.id === id);
+      if (!obj) return;
+      const next = tag.trim();
+      // Ignore empties and duplicates (exact match after trimming).
+      if (!next || obj.tags.includes(next)) return;
+      commitPatch('Add tag', id, { tags: obj.tags }, { tags: [...obj.tags, next] });
+    },
+
+    removeObjectTag: (id, tag) => {
+      const obj = get().open?.project.objects.find((o) => o.id === id);
+      if (!obj || !obj.tags.includes(tag)) return;
+      commitPatch(
+        'Remove tag',
+        id,
+        { tags: obj.tags },
+        { tags: obj.tags.filter((t) => t !== tag) },
+      );
+    },
+
+    setObjectAnchor: (id, x, y) => {
+      const obj = get().open?.project.objects.find((o) => o.id === id);
+      if (!obj || !Number.isFinite(x) || !Number.isFinite(y)) return;
+      // Clamp to the artwork bounds first, then snap to the metatile grid
+      // (matching Rust's snap(), which may land one grid line past the edge).
+      const next: Anchor = {
+        x: snapToGrid(clamp(Math.round(x), 0, obj.width)),
+        y: snapToGrid(clamp(Math.round(y), 0, obj.height)),
+      };
+      if (next.x === obj.anchor.x && next.y === obj.anchor.y) return;
+      commitPatch('Edit anchor', id, { anchor: obj.anchor }, { anchor: next });
     },
   };
 });

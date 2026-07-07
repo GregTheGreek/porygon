@@ -40,6 +40,9 @@ pub fn snap(value: u32) -> u32 {
 }
 
 /// A reusable authoring Object. Metadata only; the artwork lives on disk.
+///
+/// `category` and `tags` (M5 Inspector) are additive with serde defaults, so
+/// pre-M5 files load cleanly without a format_version bump (see project.rs).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Object {
     pub id: String,
@@ -47,6 +50,12 @@ pub struct Object {
     pub width: u32,
     pub height: u32,
     pub anchor: Anchor,
+    /// Free-text grouping label; empty means uncategorized.
+    #[serde(default)]
+    pub category: String,
+    /// Free-form labels. The frontend trims, drops empties, and dedupes.
+    #[serde(default)]
+    pub tags: Vec<String>,
 }
 
 impl Object {
@@ -62,6 +71,8 @@ impl Object {
                 x: snap(width / 2),
                 y: snap(height),
             },
+            category: String::new(),
+            tags: Vec::new(),
         }
     }
 }
@@ -194,6 +205,25 @@ mod tests {
     }
 
     #[test]
+    fn object_json_without_category_or_tags_defaults_empty() {
+        // Objects saved before M5 lack `category` and `tags` entirely.
+        let json = r#"{"id":"a","name":"Tree","width":32,"height":48,"anchor":{"x":16,"y":48}}"#;
+        let o: Object = serde_json::from_str(json).unwrap();
+        assert_eq!(o.category, "");
+        assert!(o.tags.is_empty());
+    }
+
+    #[test]
+    fn object_metadata_round_trips() {
+        let mut o = Object::new("Tree", 32, 48);
+        o.category = "Nature".to_string();
+        o.tags = vec!["tree".to_string(), "tall".to_string()];
+        let json = serde_json::to_string(&o).unwrap();
+        let back: Object = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, o);
+    }
+
+    #[test]
     fn import_copies_artwork_and_reads_dimensions() {
         let proj = temp_dir("import");
         let png = write_png(&proj, 96, 64);
@@ -213,12 +243,16 @@ mod tests {
     fn duplicate_makes_an_independent_copy() {
         let proj = temp_dir("dup");
         let png = write_png(&proj, 16, 16);
-        let src = import(proj.to_str().unwrap(), png.to_str().unwrap(), "Rock").unwrap();
+        let mut src = import(proj.to_str().unwrap(), png.to_str().unwrap(), "Rock").unwrap();
+        src.category = "Terrain".to_string();
+        src.tags = vec!["rock".to_string()];
 
         let copy = duplicate(proj.to_str().unwrap(), &src).unwrap();
         assert_ne!(copy.id, src.id);
         assert_eq!(copy.name, "Rock copy");
         assert_eq!((copy.width, copy.height), (src.width, src.height));
+        assert_eq!(copy.category, src.category);
+        assert_eq!(copy.tags, src.tags);
         assert!(object_dir(proj.to_str().unwrap(), &copy.id)
             .join(ARTWORK_FILE)
             .exists());

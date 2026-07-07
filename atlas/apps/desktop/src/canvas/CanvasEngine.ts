@@ -42,6 +42,9 @@ const CLICK_SLOP = 4;
 const CHECKER_A = 0x26262a;
 const CHECKER_B = 0x202024;
 const SELECTION_COLOR = 0x7c5cff;
+const ANCHOR_COLOR = 0xffb020;
+// Crosshair arm length in screen pixels (zoom-independent).
+const ANCHOR_ARM = 7;
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
 
@@ -55,7 +58,7 @@ const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), h
  *     world       - carries pan (position) + zoom (scale)
  *       sprite    - the artwork, nearest-neighbor sampled
  *     gridLayer   - grid lines, redrawn in screen space (crisp 1px)
- *     overlay     - selection outline, screen space
+ *     overlay     - selection outline + anchor crosshair, screen space
  */
 export class CanvasEngine {
   private app!: Application;
@@ -70,6 +73,8 @@ export class CanvasEngine {
 
   private grid: GridConfig = { show8: false, show16: false };
   private selected = false;
+  // The selected Object's anchor in artwork pixels; null hides the marker.
+  private anchor: { x: number; y: number } | null = null;
 
   private viewportW = 0;
   private viewportH = 0;
@@ -177,6 +182,12 @@ export class CanvasEngine {
     this.drawGridLayer();
   }
 
+  /** Show a crosshair at the anchor (artwork pixels); null hides it. */
+  setAnchor(anchor: { x: number; y: number } | null): void {
+    this.anchor = anchor;
+    this.drawOverlay();
+  }
+
   /** Scale the artwork to fit the viewport (with padding) and center it. */
   fit(): void {
     if (!this.sprite) return;
@@ -228,13 +239,13 @@ export class CanvasEngine {
 
   private afterTransform(): void {
     this.drawGridLayer();
-    this.drawSelection();
+    this.drawOverlay();
     this.callbacks.onZoom(Math.round(this.world.scale.x * 100));
   }
 
   private redraw(): void {
     this.drawGridLayer();
-    this.drawSelection();
+    this.drawOverlay();
   }
 
   private drawGridLayer(): void {
@@ -251,25 +262,40 @@ export class CanvasEngine {
     });
   }
 
-  private drawSelection(): void {
+  // Selection outline and anchor crosshair share the overlay layer.
+  private drawOverlay(): void {
     this.overlay.clear();
-    if (!this.selected || !this.sprite) return;
+    if (!this.sprite) return;
     const r = this.app.renderer.resolution;
     const snap = (v: number) => (Math.round(v * r) + 0.5) / r;
     const scale = this.world.scale.x;
-    const x = snap(this.world.x);
-    const y = snap(this.world.y);
-    const w = snap(this.world.x + this.artW * scale) - x;
-    const h = snap(this.world.y + this.artH * scale) - y;
-    this.overlay
-      .rect(x, y, w, h)
-      .stroke({ width: 2 / r, color: SELECTION_COLOR, alpha: 0.95 });
+
+    if (this.selected) {
+      const x = snap(this.world.x);
+      const y = snap(this.world.y);
+      const w = snap(this.world.x + this.artW * scale) - x;
+      const h = snap(this.world.y + this.artH * scale) - y;
+      this.overlay
+        .rect(x, y, w, h)
+        .stroke({ width: 2 / r, color: SELECTION_COLOR, alpha: 0.95 });
+    }
+
+    if (this.anchor) {
+      const cx = snap(this.world.x + this.anchor.x * scale);
+      const cy = snap(this.world.y + this.anchor.y * scale);
+      this.overlay
+        .moveTo(cx - ANCHOR_ARM, cy)
+        .lineTo(cx + ANCHOR_ARM, cy)
+        .moveTo(cx, cy - ANCHOR_ARM)
+        .lineTo(cx, cy + ANCHOR_ARM)
+        .stroke({ width: 2 / r, color: ANCHOR_COLOR, alpha: 0.95 });
+    }
   }
 
   private setSelected(selected: boolean): void {
     if (this.selected === selected) return;
     this.selected = selected;
-    this.drawSelection();
+    this.drawOverlay();
     this.callbacks.onSelectionChange(selected);
   }
 

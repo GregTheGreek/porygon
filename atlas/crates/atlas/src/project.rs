@@ -19,6 +19,8 @@ use crate::object::Object;
 /// v2: adds `objects` (Milestone 4). v1 files migrate forward on load: the
 /// missing `objects` field defaults to empty and the version is stamped to
 /// current (see `parse`).
+/// M5 adds per-object `category`/`tags` within v2: purely additive with serde
+/// defaults, so pre-M5 v2 files load unchanged and no version bump is needed.
 pub const FORMAT_VERSION: u32 = 2;
 
 /// Name of the manifest inside a project directory.
@@ -208,6 +210,17 @@ mod tests {
         assert!(project.objects.is_empty());
         // Migrated forward so the next save writes the current schema.
         assert_eq!(project.format_version, FORMAT_VERSION);
+    }
+
+    #[test]
+    fn parse_v2_object_without_category_or_tags_defaults() {
+        // A v2 manifest written before M5: objects lack `category` and `tags`.
+        let json = r#"{"format_version":2,"name":"P","created":1,"modified":2,
+            "objects":[{"id":"a","name":"Tree","width":32,"height":48,"anchor":{"x":16,"y":48}}]}"#;
+        let project = parse(json).unwrap();
+        assert_eq!(project.objects.len(), 1);
+        assert_eq!(project.objects[0].category, "");
+        assert!(project.objects[0].tags.is_empty());
     }
 
     #[test]

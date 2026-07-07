@@ -11,6 +11,13 @@ export function Canvas() {
 
   const artwork = useCanvasStore((s) => s.artwork);
   const setSelected = useCanvasStore((s) => s.setSelected);
+  // The selected Object's anchor drives the crosshair marker. The reference is
+  // stable across unrelated store updates, so this only re-fires on real edits.
+  const anchor = useProjectStore((s) =>
+    s.open && s.selectedObjectId
+      ? s.open.project.objects.find((o) => o.id === s.selectedObjectId)?.anchor ?? null
+      : null,
+  );
   const error = useProjectStore((s) => s.error);
   const importing = useProjectStore((s) => s.importing);
   const importObject = useProjectStore((s) => s.importObject);
@@ -44,6 +51,7 @@ export function Canvas() {
         observer.observe(mount);
         // Apply current UI state / restore artwork on remount.
         engine.setGrid({ show8, show16 });
+        engine.setAnchor(anchor);
         const current = useCanvasStore.getState().artwork;
         if (current) void engine.loadArtwork(current);
       })
@@ -76,6 +84,11 @@ export function Canvas() {
     engineRef.current?.setGrid({ show8, show16 });
   }, [show8, show16]);
 
+  // Push the anchor marker into the engine.
+  useEffect(() => {
+    engineRef.current?.setAnchor(anchor);
+  }, [anchor]);
+
   const hasArtwork = artwork !== null;
 
   return (
@@ -101,7 +114,7 @@ export function Canvas() {
             100%
           </CanvasButton>
           <span className="w-12 text-right font-mono text-fg-subtle">
-            {hasArtwork ? `${zoom}%` : '—'}
+            {hasArtwork ? `${zoom}%` : '-'}
           </span>
         </div>
       </div>
