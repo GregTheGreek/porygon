@@ -1,0 +1,6 @@
+target/
+node_modules/
+dist/
+
+# Tauri regenerates ACL schemas on every build.
+crates/atlas/gen/schemas/

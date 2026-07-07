@@ -1,0 +1,22 @@
+[package]
+name = "atlas"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Porygon desktop app (Tauri shell)"
+
+# Split into a lib + thin bin so the app entry point stays testable and the
+# bin name doesn't collide with the crate's default lib name.
+[lib]
+name = "atlas_lib"
+crate-type = ["rlib"]
+
+[build-dependencies]
+tauri-build = { version = "=2.6.1", features = [] }
+
+[dependencies]
+tauri = { version = "=2.11.1", features = [] }
+
+[lints]
+workspace = true

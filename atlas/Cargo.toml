@@ -1,0 +1,25 @@
+# Workspace root for Atlas (product name: Porygon).
+# The single member crate inherits version, edition, license, and repository
+# via `*.workspace = true`, so bumping the version is a one-line change here.
+
+[workspace]
+resolver = "2"
+members = ["crates/atlas"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/GregTheGreek/porygon"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+unused_must_use = "deny"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
