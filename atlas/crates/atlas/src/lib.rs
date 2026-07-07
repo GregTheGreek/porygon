@@ -1,9 +1,12 @@
 // Tauri 2 entry point for the Porygon desktop shell.
 
 mod artwork;
+mod collision;
 mod object;
+mod pokemon_emerald;
 mod project;
 mod recents;
+mod validity;
 
 use std::path::PathBuf;
 
@@ -11,8 +14,10 @@ use tauri::{AppHandle, Manager};
 
 use artwork::Artwork;
 use object::Object;
+use pokemon_emerald::CollisionTag;
 use project::{OpenProject, Project};
 use recents::Recent;
+use validity::Problem;
 
 /// Returns the crate version. Wired end-to-end to prove the IPC bridge; the
 /// toolbar displays it.
@@ -105,6 +110,21 @@ fn read_object_artwork(project_path: String, id: String) -> Result<Artwork, Stri
     object::read_artwork(&project_path, &id).map_err(|e| e.to_string())
 }
 
+/// The custom collision-tag vocabulary from the pokemon_emerald engine module.
+/// The frontend's Custom-tag dropdown consumes this; the list is never
+/// hardcoded in TypeScript (the Bible requires it to come from the engine).
+#[tauri::command]
+fn collision_tags() -> Vec<CollisionTag> {
+    pokemon_emerald::collision_tags()
+}
+
+/// Tier 1 (Object) validity problems for one Object, in artist terms. The
+/// Inspector renders these in its Problems section. Empty means coherent.
+#[tauri::command]
+fn object_problems(object: Object) -> Vec<Problem> {
+    validity::object_problems(&object)
+}
+
 #[tauri::command]
 fn get_recent_projects(app: AppHandle) -> Result<Vec<Recent>, String> {
     let file = recents_file(&app)?;
@@ -128,6 +148,8 @@ pub fn run() {
             trash_object,
             restore_object,
             read_object_artwork,
+            collision_tags,
+            object_problems,
             get_recent_projects
         ])
         .run(tauri::generate_context!())

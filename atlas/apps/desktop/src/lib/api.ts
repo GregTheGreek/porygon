@@ -9,6 +9,16 @@ export type Anchor = {
   y: number;
 };
 
+// One collision cell's value. Mirrors CollisionValue in crates/atlas/src/
+// collision.rs (serde external tagging: unit variants are plain strings, the
+// tagged variant is an object). `Walkable` is only used as a paint/erase value;
+// it is never stored in the sparse map (its absence means Walkable).
+export type CollisionValue = 'Walkable' | 'Blocked' | { Custom: string };
+
+// Painted collision on the 16px grid. Sparse: only non-Walkable cells, keyed by
+// row-major cell index (as a string, since JSON object keys are strings).
+export type Collision = { cells: Record<string, CollisionValue> };
+
 // A reusable authoring Object. Metadata only; artwork pixels live on disk under
 // the project's `objects/<id>/` directory and are fetched via readObjectArtwork.
 export type AtlasObject = {
@@ -19,6 +29,23 @@ export type AtlasObject = {
   anchor: Anchor;
   category: string;
   tags: string[];
+  collision: Collision;
+};
+
+// One entry in the engine's custom collision-tag vocabulary (from the
+// pokemon_emerald module). `tag` is the opaque id stored on a Custom cell;
+// `behavior` is the MB_* name it compiles to (shown for reference only).
+export type CollisionTag = {
+  tag: string;
+  label: string;
+  behavior: string;
+};
+
+// A validity problem, in artist terms. `tier` is the validity tier it belongs
+// to (only 'Object' / Tier 1 exists today). Mirrors validity.rs.
+export type Problem = {
+  tier: 'Object';
+  message: string;
 };
 
 // Mirrors the serde structs in crates/atlas/src/project.rs. Rust owns the
@@ -136,4 +163,15 @@ export async function readObjectArtwork(
   id: string,
 ): Promise<Artwork> {
   return invoke<Artwork>('read_object_artwork', { projectPath, id });
+}
+
+/// The custom collision-tag vocabulary from the pokemon_emerald engine module.
+/// Populates the Custom-tag dropdown; never hardcoded in the frontend.
+export async function getCollisionTags(): Promise<CollisionTag[]> {
+  return invoke<CollisionTag[]>('collision_tags');
+}
+
+/// Tier 1 (Object) validity problems for an Object, in artist terms.
+export async function getObjectProblems(object: AtlasObject): Promise<Problem[]> {
+  return invoke<Problem[]>('object_problems', { object });
 }

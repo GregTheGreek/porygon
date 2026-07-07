@@ -1,6 +1,13 @@
 import { create } from 'zustand';
 import * as api from '../lib/api';
-import type { Anchor, AtlasObject, OpenProject, Recent } from '../lib/api';
+import type {
+  Anchor,
+  AtlasObject,
+  Collision,
+  CollisionValue,
+  OpenProject,
+  Recent,
+} from '../lib/api';
 import { useCanvasStore } from './canvas';
 import { useHistory } from './history';
 
@@ -51,6 +58,10 @@ type ProjectState = {
   addObjectTag: (id: string, tag: string) => void;
   removeObjectTag: (id: string, tag: string) => void;
   setObjectAnchor: (id: string, x: number, y: number) => void;
+
+  // Collision painting (M6). One command per brush stroke; the Canvas engine
+  // reports the cells a stroke touched and the value to apply.
+  paintCollision: (id: string, indices: number[], value: CollisionValue) => void;
 };
 
 export const useProjectStore = create<ProjectState>((set, get) => {
@@ -426,6 +437,28 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       };
       if (next.x === obj.anchor.x && next.y === obj.anchor.y) return;
       commitPatch('Edit anchor', id, { anchor: obj.anchor }, { anchor: next });
+    },
+
+    paintCollision: (id, indices, value) => {
+      const obj = get().open?.project.objects.find((o) => o.id === id);
+      if (!obj || indices.length === 0) return;
+
+      // A stroke is one undo step: snapshot the sparse map, apply every touched
+      // cell, and commit before/after as a single command. The map is small
+      // (only non-Walkable cells) so snapshotting the whole thing is cheap and
+      // keeps undo trivially correct.
+      const before = obj.collision?.cells ?? {};
+      const after = { ...before };
+      const erase = value === 'Walkable';
+      for (const i of indices) {
+        const key = String(i);
+        if (erase) delete after[key];
+        else after[key] = value;
+      }
+
+      const prev: Collision = { cells: before };
+      const nextCollision: Collision = { cells: after };
+      commitPatch('Paint collision', id, { collision: prev }, { collision: nextCollision });
     },
   };
 });

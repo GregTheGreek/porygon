@@ -17,6 +17,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::artwork::{self, Artwork, ArtworkError};
+use crate::collision::Collision;
 
 /// The metatile grid the anchor snaps to, in pixels.
 pub const GRID: u32 = 16;
@@ -41,8 +42,10 @@ pub fn snap(value: u32) -> u32 {
 
 /// A reusable authoring Object. Metadata only; the artwork lives on disk.
 ///
-/// `category` and `tags` (M5 Inspector) are additive with serde defaults, so
-/// pre-M5 files load cleanly without a format_version bump (see project.rs).
+/// `category`/`tags` (M5) and `collision` (M6) are additive with serde
+/// defaults, so pre-M5/M6 files load cleanly without a format_version bump (same
+/// rationale as project.rs): a missing field defaults, and the next save writes
+/// the current shape.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Object {
     pub id: String,
@@ -56,6 +59,10 @@ pub struct Object {
     /// Free-form labels. The frontend trims, drops empties, and dedupes.
     #[serde(default)]
     pub tags: Vec<String>,
+    /// Painted collision on the 16px grid (M6). Sparse; empty means all
+    /// Walkable. Defaults empty for objects saved before M6.
+    #[serde(default)]
+    pub collision: Collision,
 }
 
 impl Object {
@@ -73,7 +80,14 @@ impl Object {
             },
             category: String::new(),
             tags: Vec::new(),
+            collision: Collision::default(),
         }
+    }
+
+    /// Construct an Object with a fresh id for tests in sibling modules.
+    #[cfg(test)]
+    pub fn for_test(name: &str, width: u32, height: u32) -> Self {
+        Self::new(name, width, height)
     }
 }
 
@@ -211,6 +225,29 @@ mod tests {
         let o: Object = serde_json::from_str(json).unwrap();
         assert_eq!(o.category, "");
         assert!(o.tags.is_empty());
+    }
+
+    #[test]
+    fn pre_m6_object_json_defaults_empty_collision() {
+        // Objects saved before M6 lack `collision`; it must default to empty so
+        // older projects load without a format_version bump.
+        let json = r#"{"id":"a","name":"Tree","width":32,"height":48,
+            "anchor":{"x":16,"y":48},"category":"Nature","tags":["tree"]}"#;
+        let o: Object = serde_json::from_str(json).unwrap();
+        assert!(o.collision.cells.is_empty());
+    }
+
+    #[test]
+    fn object_with_collision_round_trips() {
+        use crate::collision::CollisionValue;
+        let mut o = Object::new("Tree", 32, 48);
+        o.collision.cells.insert(0, CollisionValue::Blocked);
+        o.collision
+            .cells
+            .insert(4, CollisionValue::Custom("tall_grass".to_string()));
+        let json = serde_json::to_string(&o).unwrap();
+        let back: Object = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, o);
     }
 
     #[test]

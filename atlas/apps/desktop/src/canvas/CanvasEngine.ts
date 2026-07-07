@@ -11,12 +11,21 @@ import {
   TilingSprite,
 } from 'pixi.js';
 import { drawGrid, type GridConfig } from './grid';
+import type { CollisionValue } from '../lib/api';
+
+export type PaintMode = 'select' | 'collision';
 
 export type CanvasCallbacks = {
   /** Current zoom as a percentage (100 = 1:1). */
   onZoom: (percent: number) => void;
   /** Whether the artwork is currently selected. */
   onSelectionChange: (selected: boolean) => void;
+  /**
+   * A collision brush stroke finished. `indices` are the row-major cell indices
+   * whose value actually changed; `value` is what to apply ('Walkable' erases).
+   * React turns this into one undoable store mutation.
+   */
+  onCollisionStroke: (indices: number[], value: CollisionValue) => void;
 };
 
 export type ArtworkInput = {
@@ -46,7 +55,22 @@ const ANCHOR_COLOR = 0xffb020;
 // Crosshair arm length in screen pixels (zoom-independent).
 const ANCHOR_ARM = 7;
 
+// Collision overlay: one metatile cell = 16px, and the tint colors per value.
+const COLLISION_CELL = 16;
+const COLLISION_ALPHA = 0.4;
+const BLOCKED_COLOR = 0xff3b30; // red: cannot walk here
+const CUSTOM_COLOR = 0x00b8d4; // teal: a semantic tag (tall grass, water, ...)
+
 const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
+
+// Whether two collision values are equal (handles the Custom tag object).
+function collisionValueEq(
+  a: CollisionValue | undefined,
+  b: CollisionValue,
+): boolean {
+  if (typeof a === 'object' && typeof b === 'object') return a.Custom === b.Custom;
+  return a === b;
+}
 
 /**
  * The PixiJS world for the Canvas. React owns only mounting and prop plumbing;
@@ -54,16 +78,18 @@ const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), h
  *
  * Layout of the scene:
  *   stage
- *     background  - checkerboard, screen space, never scaled
- *     world       - carries pan (position) + zoom (scale)
- *       sprite    - the artwork, nearest-neighbor sampled
- *     gridLayer   - grid lines, redrawn in screen space (crisp 1px)
- *     overlay     - selection outline + anchor crosshair, screen space
+ *     background     - checkerboard, screen space, never scaled
+ *     world          - carries pan (position) + zoom (scale)
+ *       sprite       - the artwork, nearest-neighbor sampled
+ *     collisionLayer - collision tint per 16px cell, screen space
+ *     gridLayer      - grid lines, redrawn in screen space (crisp 1px)
+ *     overlay        - selection outline + anchor crosshair, screen space
  */
 export class CanvasEngine {
   private app!: Application;
   private world!: Container;
   private background!: TilingSprite;
+  private collisionLayer!: Graphics;
   private gridLayer!: Graphics;
   private overlay!: Graphics;
 
@@ -75,6 +101,18 @@ export class CanvasEngine {
   private selected = false;
   // The selected Object's anchor in artwork pixels; null hides the marker.
   private anchor: { x: number; y: number } | null = null;
+
+  // Collision state. `collisionCells` is the engine's render copy of the sparse
+  // grid (row-major index -> value); React pushes it via setCollision and it is
+  // mutated locally during a stroke for immediate feedback.
+  private collisionCells = new Map<number, CollisionValue>();
+  private collisionVisible = true;
+  private paintMode: PaintMode = 'select';
+  private paintValue: CollisionValue = 'Blocked';
+  // Active stroke: the pointer we captured and the cells it actually changed.
+  private painting = false;
+  private paintPointerId = -1;
+  private strokeChanges = new Set<number>();
 
   private viewportW = 0;
   private viewportH = 0;
@@ -118,9 +156,16 @@ export class CanvasEngine {
       height: this.viewportH,
     });
     this.world = new Container();
+    this.collisionLayer = new Graphics();
     this.gridLayer = new Graphics();
     this.overlay = new Graphics();
-    this.app.stage.addChild(this.background, this.world, this.gridLayer, this.overlay);
+    this.app.stage.addChild(
+      this.background,
+      this.world,
+      this.collisionLayer,
+      this.gridLayer,
+      this.overlay,
+    );
 
     this.attachInput();
     this.redraw();
@@ -141,6 +186,7 @@ export class CanvasEngine {
     this.background.width = this.viewportW;
     this.background.height = this.viewportH;
     this.redraw();
+    this.drawCollisionLayer();
   }
 
   async loadArtwork(art: ArtworkInput): Promise<void> {
@@ -163,6 +209,9 @@ export class CanvasEngine {
     this.artH = art.height;
     this.setSelected(false);
     this.fit();
+    // fit() redraws the grid/overlay; the collision tint depends on artW/artH
+    // now being set, so draw it once the artwork size is known.
+    this.drawCollisionLayer();
   }
 
   clearArtwork(): void {
@@ -180,6 +229,32 @@ export class CanvasEngine {
   setGrid(config: GridConfig): void {
     this.grid = config;
     this.drawGridLayer();
+  }
+
+  /** Replace the collision grid to render (row-major index -> value). */
+  setCollision(cells: Record<string, CollisionValue>): void {
+    this.collisionCells = new Map(
+      Object.entries(cells).map(([k, v]) => [Number(k), v]),
+    );
+    this.drawCollisionLayer();
+  }
+
+  /** Show or hide the collision tint, independent of paint mode. */
+  setCollisionVisible(visible: boolean): void {
+    this.collisionVisible = visible;
+    this.drawCollisionLayer();
+  }
+
+  /** Switch the brush between selection and collision painting. */
+  setPaintMode(mode: PaintMode): void {
+    if (this.paintMode === mode) return;
+    this.paintMode = mode;
+    this.updateCursor();
+  }
+
+  /** Set the value the collision brush paints ('Walkable' erases). */
+  setActiveCollisionValue(value: CollisionValue): void {
+    this.paintValue = value;
   }
 
   /** Show a crosshair at the anchor (artwork pixels); null hides it. */
@@ -238,6 +313,7 @@ export class CanvasEngine {
   }
 
   private afterTransform(): void {
+    this.drawCollisionLayer();
     this.drawGridLayer();
     this.drawOverlay();
     this.callbacks.onZoom(Math.round(this.world.scale.x * 100));
@@ -246,6 +322,34 @@ export class CanvasEngine {
   private redraw(): void {
     this.drawGridLayer();
     this.drawOverlay();
+  }
+
+  // Collision tint: one translucent rect per non-Walkable cell, in screen
+  // space (like the grid) so it tracks pan/zoom. Edge cells on artwork whose
+  // size is not a multiple of 16 are clamped to the artwork bounds so the tint
+  // never spills past the image.
+  private drawCollisionLayer(): void {
+    this.collisionLayer.clear();
+    if (!this.sprite || !this.collisionVisible || this.collisionCells.size === 0) {
+      return;
+    }
+    const cols = Math.ceil(this.artW / COLLISION_CELL);
+    const scale = this.world.scale.x;
+    for (const [index, value] of this.collisionCells) {
+      const col = index % cols;
+      const row = Math.floor(index / cols);
+      const ax0 = col * COLLISION_CELL;
+      const ay0 = row * COLLISION_CELL;
+      const ax1 = Math.min(ax0 + COLLISION_CELL, this.artW);
+      const ay1 = Math.min(ay0 + COLLISION_CELL, this.artH);
+      if (ax1 <= ax0 || ay1 <= ay0) continue; // cell fully outside artwork
+      const sx = this.world.x + ax0 * scale;
+      const sy = this.world.y + ay0 * scale;
+      const color = typeof value === 'object' ? CUSTOM_COLOR : BLOCKED_COLOR;
+      this.collisionLayer
+        .rect(sx, sy, (ax1 - ax0) * scale, (ay1 - ay0) * scale)
+        .fill({ color, alpha: COLLISION_ALPHA });
+    }
   }
 
   private drawGridLayer(): void {
@@ -362,6 +466,17 @@ export class CanvasEngine {
       e.preventDefault();
       return;
     }
+    // Collision mode: left-drag paints. (Space+left already panned above, so
+    // panning still works while painting.)
+    if (this.paintMode === 'collision' && e.button === 0) {
+      this.painting = true;
+      this.paintPointerId = e.pointerId;
+      this.strokeChanges.clear();
+      this.canvas.setPointerCapture(e.pointerId);
+      this.paintAt(e);
+      e.preventDefault();
+      return;
+    }
     if (e.button === 0) {
       this.pressStart = { x: e.clientX, y: e.clientY };
     }
@@ -371,6 +486,10 @@ export class CanvasEngine {
     if (this.panning && e.pointerId === this.panPointerId) {
       this.panBy(e.clientX - this.lastPan.x, e.clientY - this.lastPan.y);
       this.lastPan = { x: e.clientX, y: e.clientY };
+      return;
+    }
+    if (this.painting && e.pointerId === this.paintPointerId) {
+      this.paintAt(e);
     }
   };
 
@@ -380,6 +499,17 @@ export class CanvasEngine {
       this.panPointerId = -1;
       this.canvas.releasePointerCapture(e.pointerId);
       this.updateCursor();
+      return;
+    }
+    if (this.painting && e.pointerId === this.paintPointerId) {
+      this.painting = false;
+      this.paintPointerId = -1;
+      this.canvas.releasePointerCapture(e.pointerId);
+      // One command per stroke: report only the cells that actually changed.
+      if (this.strokeChanges.size > 0) {
+        this.callbacks.onCollisionStroke([...this.strokeChanges], this.paintValue);
+      }
+      this.strokeChanges.clear();
       return;
     }
     if (this.pressStart && e.button === 0) {
@@ -460,12 +590,47 @@ export class CanvasEngine {
     this.setSelected(hit);
   }
 
+  // The row-major collision cell under a pointer event, or null if outside the
+  // artwork.
+  private cellAt(e: { clientX: number; clientY: number }): number | null {
+    if (!this.sprite) return null;
+    const p = this.localPoint(e);
+    const scale = this.world.scale.x;
+    const wx = (p.x - this.world.x) / scale;
+    const wy = (p.y - this.world.y) / scale;
+    if (wx < 0 || wy < 0 || wx >= this.artW || wy >= this.artH) return null;
+    const cols = Math.ceil(this.artW / COLLISION_CELL);
+    const col = Math.floor(wx / COLLISION_CELL);
+    const row = Math.floor(wy / COLLISION_CELL);
+    return row * cols + col;
+  }
+
+  // Paint the active value onto the cell under the pointer, updating the local
+  // render copy for immediate feedback and recording cells that actually change
+  // (so the stroke's undo command carries only real changes).
+  private paintAt(e: PointerEvent): void {
+    const cell = this.cellAt(e);
+    if (cell === null) return;
+    const current = this.collisionCells.get(cell);
+    if (collisionValueEq(current, this.paintValue)) return; // no change
+    if (this.paintValue === 'Walkable') this.collisionCells.delete(cell);
+    else this.collisionCells.set(cell, this.paintValue);
+    this.strokeChanges.add(cell);
+    this.drawCollisionLayer();
+  }
+
   private setCursor(cursor: string): void {
     this.canvas.style.cursor = cursor;
   }
 
   private updateCursor(): void {
-    this.setCursor(this.spaceDown ? 'grab' : 'default');
+    if (this.spaceDown) {
+      this.setCursor('grab');
+    } else if (this.paintMode === 'collision') {
+      this.setCursor('crosshair');
+    } else {
+      this.setCursor('default');
+    }
   }
 
   private makeCheckerTexture(): Texture {

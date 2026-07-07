@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useProjectStore } from '../store/project';
+import { getObjectProblems, type AtlasObject, type Problem } from '../lib/api';
 
 // Right panel: live, dialog-free metadata editing for the selected Object.
 // Fields commit on blur/Enter; every commit is an undoable store mutation, so
@@ -66,7 +67,53 @@ export function Inspector() {
           />
         </div>
       </Field>
+
+      <Problems object={object} />
     </div>
+  );
+}
+
+// Tier 1 (Object) validity for the selected object. The seed of the Problems
+// panel: honest and small. Warnings are computed in Rust (validity.rs) so the
+// wording and tier definitions stay with the schema owner.
+function Problems({ object }: { object: AtlasObject }) {
+  const [problems, setProblems] = useState<Problem[]>([]);
+
+  // Tier 1 checks depend on the artwork dimensions, which are fixed per object,
+  // so refetching when the id or size changes is enough.
+  useEffect(() => {
+    let alive = true;
+    getObjectProblems(object)
+      .then((p) => {
+        if (alive) setProblems(p);
+      })
+      .catch(() => {
+        if (alive) setProblems([]);
+      });
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [object.id, object.width, object.height]);
+
+  if (problems.length === 0) return null;
+
+  return (
+    <Field label="Problems">
+      <ul className="mt-1 space-y-1">
+        {problems.map((p, i) => (
+          <li
+            key={i}
+            className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs text-amber-200"
+          >
+            <span className="mr-1 font-medium uppercase tracking-wide text-amber-400/80">
+              {p.tier}
+            </span>
+            {p.message}
+          </li>
+        ))}
+      </ul>
+    </Field>
   );
 }
 

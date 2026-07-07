@@ -2,6 +2,12 @@ import { useEffect, useRef, useState } from 'react';
 import { CanvasEngine } from '../canvas/CanvasEngine';
 import { useCanvasStore } from '../store/canvas';
 import { useProjectStore } from '../store/project';
+import { CollisionControls } from './CollisionControls';
+import type { CollisionValue } from '../lib/api';
+
+// Stable empty map for objects/selections with no painted collision, so the
+// selector below never returns a fresh reference and loops renders.
+const NO_CELLS: Record<string, CollisionValue> = {};
 
 // The center region. React only mounts the Pixi world and plumbs props; all
 // rendering, zoom, pan, grid, and selection live in CanvasEngine.
@@ -23,6 +29,18 @@ export function Canvas() {
   const importObject = useProjectStore((s) => s.importObject);
   const hasObjects = useProjectStore((s) => (s.open?.project.objects.length ?? 0) > 0);
 
+  // The selected Object's collision cells drive the overlay. The reference is
+  // stable until the object is edited, so this only re-fires on real changes.
+  const collisionCells = useProjectStore((s) =>
+    s.open && s.selectedObjectId
+      ? s.open.project.objects.find((o) => o.id === s.selectedObjectId)?.collision.cells ??
+        NO_CELLS
+      : NO_CELLS,
+  );
+  const paintMode = useCanvasStore((s) => s.paintMode);
+  const collisionVisible = useCanvasStore((s) => s.collisionVisible);
+  const paintValue = useCanvasStore((s) => s.paintValue);
+
   const [zoom, setZoom] = useState(100);
   const [show8, setShow8] = useState(false);
   const [show16, setShow16] = useState(false);
@@ -37,7 +55,18 @@ export function Canvas() {
     let observer: ResizeObserver | null = null;
 
     void engine
-      .init(mount, { onZoom: setZoom, onSelectionChange: setSelected })
+      .init(mount, {
+        onZoom: setZoom,
+        onSelectionChange: setSelected,
+        // Read the live selection/action from the store so this stays correct
+        // regardless of what was selected when the engine mounted.
+        onCollisionStroke: (indices, value) => {
+          const store = useProjectStore.getState();
+          if (store.selectedObjectId) {
+            store.paintCollision(store.selectedObjectId, indices, value);
+          }
+        },
+      })
       .then(() => {
         if (disposed) {
           engine.destroy();
@@ -52,8 +81,18 @@ export function Canvas() {
         // Apply current UI state / restore artwork on remount.
         engine.setGrid({ show8, show16 });
         engine.setAnchor(anchor);
-        const current = useCanvasStore.getState().artwork;
-        if (current) void engine.loadArtwork(current);
+        const canvas = useCanvasStore.getState();
+        engine.setPaintMode(canvas.paintMode);
+        engine.setCollisionVisible(canvas.collisionVisible);
+        engine.setActiveCollisionValue(canvas.paintValue);
+        const project = useProjectStore.getState();
+        const selectedCells =
+          project.open && project.selectedObjectId
+            ? project.open.project.objects.find((o) => o.id === project.selectedObjectId)
+                ?.collision.cells ?? NO_CELLS
+            : NO_CELLS;
+        engine.setCollision(selectedCells);
+        if (canvas.artwork) void engine.loadArtwork(canvas.artwork);
       })
       .catch((e: unknown) => {
         // A failed renderer init must be visible, not a silent blank canvas.
@@ -89,14 +128,32 @@ export function Canvas() {
     engineRef.current?.setAnchor(anchor);
   }, [anchor]);
 
+  // Push collision state into the engine. Overlay updates immediately on paint,
+  // undo/redo, selection change, and visibility/mode/value toggles.
+  useEffect(() => {
+    engineRef.current?.setCollision(collisionCells);
+  }, [collisionCells]);
+  useEffect(() => {
+    engineRef.current?.setPaintMode(paintMode);
+  }, [paintMode]);
+  useEffect(() => {
+    engineRef.current?.setCollisionVisible(collisionVisible);
+  }, [collisionVisible]);
+  useEffect(() => {
+    engineRef.current?.setActiveCollisionValue(paintValue);
+  }, [paintValue]);
+
   const hasArtwork = artwork !== null;
 
   return (
     <div className="flex h-full min-w-0 flex-col bg-bg">
-      <div className="flex h-8 shrink-0 items-center justify-between border-b border-bg-border px-3">
-        <span className="text-xs font-medium uppercase tracking-wide text-fg-muted">
-          Canvas
-        </span>
+      <div className="flex h-8 shrink-0 items-center justify-between gap-3 border-b border-bg-border px-3">
+        <div className="flex items-center gap-2 text-xs">
+          <span className="font-medium uppercase tracking-wide text-fg-muted">
+            Canvas
+          </span>
+          {hasArtwork && <CollisionControls />}
+        </div>
         <div className="flex items-center gap-1 text-xs">
           <GridToggle label="8" title="Toggle 8px tile grid" active={show8} onClick={() => setShow8((v) => !v)} />
           <GridToggle label="16" title="Toggle 16px metatile grid" active={show16} onClick={() => setShow16((v) => !v)} />
