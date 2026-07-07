@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Panel } from './Panel';
 import { Canvas } from './Canvas';
 import { ResizeHandle } from './ResizeHandle';
+import { useCanvasStore } from '../store/canvas';
 
 const clamp = (value: number, min: number, max: number) =>
   Math.min(Math.max(value, min), max);
@@ -37,7 +38,7 @@ export function Workspace() {
         />
         <div style={{ width: rightWidth }} className="shrink-0">
           <Panel title="Inspector" className="h-full">
-            No selection. Select an object to edit its metadata.
+            <Inspector />
           </Panel>
         </div>
       </div>
@@ -60,6 +61,34 @@ export function Workspace() {
         <Panel title="Export" className="flex-1">
           No export target configured.
         </Panel>
+      </div>
+    </div>
+  );
+}
+
+// M3 placeholder Inspector: when the imported artwork is selected on the
+// Canvas, show its filename and dimensions. Real Objects arrive in M4.
+function Inspector() {
+  const artwork = useCanvasStore((s) => s.artwork);
+  const selected = useCanvasStore((s) => s.selected);
+
+  if (!artwork || !selected) {
+    return <>No selection. Select artwork on the canvas to inspect it.</>;
+  }
+
+  return (
+    <div className="space-y-3">
+      <div>
+        <div className="text-xs uppercase tracking-wide text-fg-muted">Artwork</div>
+        <div className="mt-1 truncate text-sm text-fg" title={artwork.name}>
+          {artwork.name}
+        </div>
+      </div>
+      <div>
+        <div className="text-xs uppercase tracking-wide text-fg-muted">Dimensions</div>
+        <div className="mt-1 font-mono text-sm text-fg">
+          {artwork.width} × {artwork.height} px
+        </div>
       </div>
     </div>
   );

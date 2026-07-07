@@ -20,6 +20,9 @@ tauri = { version = "=2.11.1", features = [] }
 tauri-plugin-dialog = "=2.7.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Encode PNG bytes for the IPC bridge; a JSON byte array would bloat 20 MB into
+# ~60 MB of numbers, so base64 keeps the payload compact.
+base64 = "=0.22.1"
 
 [lints]
 workspace = true

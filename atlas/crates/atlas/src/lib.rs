@@ -1,5 +1,6 @@
 // Tauri 2 entry point for the Porygon desktop shell.
 
+mod artwork;
 mod project;
 mod recents;
 
@@ -7,6 +8,7 @@ use std::path::PathBuf;
 
 use tauri::{AppHandle, Manager};
 
+use artwork::Artwork;
 use project::{OpenProject, Project};
 use recents::Recent;
 
@@ -61,6 +63,13 @@ fn save_project(app: AppHandle, path: String, project: Project) -> Result<Projec
     Ok(saved)
 }
 
+/// Read a PNG the user picked for the Canvas. Session-scoped: nothing is
+/// persisted (Objects, M4, own artwork). Returns bytes (base64) + dimensions.
+#[tauri::command]
+fn read_artwork(path: String) -> Result<Artwork, String> {
+    artwork::read(&path).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn get_recent_projects(app: AppHandle) -> Result<Vec<Recent>, String> {
     let file = recents_file(&app)?;
@@ -78,6 +87,7 @@ pub fn run() {
             create_project,
             open_project,
             save_project,
+            read_artwork,
             get_recent_projects
         ])
         .run(tauri::generate_context!())

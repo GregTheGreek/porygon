@@ -20,6 +20,16 @@ export type Recent = {
   name: string;
 };
 
+// A validated PNG read for the Canvas. `data` is base64 of the raw file;
+// build a `data:image/png;base64,${data}` URL to display it. Session-scoped:
+// nothing is persisted (Objects, M4, own artwork).
+export type Artwork = {
+  name: string;
+  width: number;
+  height: number;
+  data: string;
+};
+
 /// Reads the crate version from the Rust side. Proves the IPC bridge works.
 export async function getAppVersion(): Promise<string> {
   return invoke<string>('app_version');
@@ -55,4 +65,19 @@ export async function getRecentProjects(): Promise<Recent[]> {
 export async function pickDirectory(title: string): Promise<string | null> {
   const result = await openDialog({ directory: true, multiple: false, title });
   return typeof result === 'string' ? result : null;
+}
+
+/// Native PNG file picker. Returns null if the user cancels.
+export async function pickPngFile(): Promise<string | null> {
+  const result = await openDialog({
+    multiple: false,
+    title: 'Import PNG artwork',
+    filters: [{ name: 'PNG image', extensions: ['png'] }],
+  });
+  return typeof result === 'string' ? result : null;
+}
+
+/// Read, validate, and load a PNG through Rust (no fs plugin needed).
+export async function readArtwork(path: string): Promise<Artwork> {
+  return invoke<Artwork>('read_artwork', { path });
 }
