@@ -8,8 +8,14 @@
 //!
 //! We only need to validate the magic bytes and read the dimensions, not decode
 //! pixels, so we parse the PNG header by hand rather than pull in a decoder.
+//!
+//! Budgeting (Milestone 9) is the exception: predicting palette/tile budgets
+//! needs the actual pixels, so `decode_rgba` uses the `png` crate to decode a
+//! stored artwork to RGBA8. The header-validation path above stays untouched -
+//! it is what import (M4) uses, and it must not depend on a full decode.
 
 use std::fs;
+use std::fs::File;
 use std::path::Path;
 
 use base64::engine::general_purpose::STANDARD;
@@ -87,6 +93,65 @@ fn inspect(bytes: &[u8], max: usize) -> Result<(u32, u32), ArtworkError> {
         return Err(ArtworkError::Corrupt("zero-sized image".into()));
     }
     Ok((width, height))
+}
+
+/// A fully decoded artwork: RGBA8 pixels, row-major, `width * height` long.
+/// Used only by the budget path (M9); import never decodes pixels.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DecodedArtwork {
+    pub width: u32,
+    pub height: u32,
+    /// One `[R, G, B, A]` per pixel, row-major (`y * width + x`).
+    pub pixels: Vec<[u8; 4]>,
+}
+
+/// Decode the PNG at `path` to RGBA8.
+///
+/// Normalises every input to 8-bit RGBA regardless of the source colour type:
+/// `EXPAND` promotes paletted / low-bit grayscale and expands tRNS to alpha,
+/// `STRIP_16` narrows 16-bit samples to 8. Whatever channel layout survives
+/// (grayscale, grayscale+alpha, RGB, RGBA) is then widened to RGBA per pixel, so
+/// the budget maths always sees a uniform buffer.
+pub fn decode_rgba(path: &str) -> Result<DecodedArtwork, ArtworkError> {
+    let file = File::open(path).map_err(|e| ArtworkError::Io(e.to_string()))?;
+    let mut decoder = png::Decoder::new(std::io::BufReader::new(file));
+    decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
+    let mut reader = decoder
+        .read_info()
+        .map_err(|e| ArtworkError::Corrupt(e.to_string()))?;
+
+    let size = reader
+        .output_buffer_size()
+        .ok_or_else(|| ArtworkError::Corrupt("image too large to decode".into()))?;
+    let mut buf = vec![0u8; size];
+    let info = reader
+        .next_frame(&mut buf)
+        .map_err(|e| ArtworkError::Corrupt(e.to_string()))?;
+
+    let (width, height) = (info.width, info.height);
+    // `samples` is the channel count of the transformed output (1..=4). Widen
+    // each sample group to RGBA: missing colour channels replicate grey, a
+    // missing alpha channel is fully opaque.
+    let samples = info.color_type.samples();
+    let expected = width as usize * height as usize;
+    let mut pixels = Vec::with_capacity(expected);
+    for chunk in buf[..info.buffer_size()].chunks_exact(samples) {
+        let rgba = match samples {
+            1 => [chunk[0], chunk[0], chunk[0], 255],
+            2 => [chunk[0], chunk[0], chunk[0], chunk[1]],
+            3 => [chunk[0], chunk[1], chunk[2], 255],
+            _ => [chunk[0], chunk[1], chunk[2], chunk[3]],
+        };
+        pixels.push(rgba);
+    }
+    if pixels.len() != expected {
+        return Err(ArtworkError::Corrupt("decoded pixel count mismatch".into()));
+    }
+    Ok(DecodedArtwork {
+        width,
+        height,
+        pixels,
+    })
 }
 
 /// Read, validate, and encode the PNG at `path`.
@@ -169,5 +234,58 @@ mod tests {
             inspect(&png_header(0, 16), MAX_ARTWORK_BYTES),
             Err(ArtworkError::Corrupt(_))
         ));
+    }
+
+    /// Encode `pixels` (RGBA, row-major) to a real PNG on disk for decode tests.
+    fn write_rgba_png(w: u32, h: u32, pixels: &[[u8; 4]]) -> std::path::PathBuf {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static N: AtomicU64 = AtomicU64::new(0);
+        let n = N.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!("atlas-dec-{}-{n}.png", std::process::id()));
+        let file = fs::File::create(&path).unwrap();
+        let mut enc = png::Encoder::new(file, w, h);
+        enc.set_color(png::ColorType::Rgba);
+        enc.set_depth(png::BitDepth::Eight);
+        let mut writer = enc.write_header().unwrap();
+        let flat: Vec<u8> = pixels.iter().flatten().copied().collect();
+        writer.write_image_data(&flat).unwrap();
+        writer.finish().unwrap();
+        path
+    }
+
+    #[test]
+    fn decode_rgba_round_trips_pixels() {
+        let pixels = [
+            [255, 0, 0, 255],
+            [0, 255, 0, 128],
+            [0, 0, 255, 255],
+            [255, 0, 255, 0], // magenta, fully transparent
+        ];
+        let path = write_rgba_png(2, 2, &pixels);
+        let decoded = decode_rgba(path.to_str().unwrap()).unwrap();
+        assert_eq!((decoded.width, decoded.height), (2, 2));
+        assert_eq!(decoded.pixels, pixels);
+    }
+
+    #[test]
+    fn decode_widens_rgb_to_opaque_rgba() {
+        // An RGB PNG (no alpha) must decode with alpha 255 on every pixel.
+        let path = {
+            use std::sync::atomic::{AtomicU64, Ordering};
+            static N: AtomicU64 = AtomicU64::new(0);
+            let n = N.fetch_add(1, Ordering::Relaxed);
+            let p =
+                std::env::temp_dir().join(format!("atlas-rgb-{}-{n}.png", std::process::id()));
+            let file = fs::File::create(&p).unwrap();
+            let mut enc = png::Encoder::new(file, 1, 2);
+            enc.set_color(png::ColorType::Rgb);
+            enc.set_depth(png::BitDepth::Eight);
+            let mut writer = enc.write_header().unwrap();
+            writer.write_image_data(&[10, 20, 30, 40, 50, 60]).unwrap();
+            writer.finish().unwrap();
+            p
+        };
+        let decoded = decode_rgba(path.to_str().unwrap()).unwrap();
+        assert_eq!(decoded.pixels, vec![[10, 20, 30, 255], [40, 50, 60, 255]]);
     }
 }

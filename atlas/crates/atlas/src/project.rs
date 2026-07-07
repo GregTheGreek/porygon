@@ -12,6 +12,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 
 use crate::object::Object;
+use crate::tileset::Tileset;
 
 /// Current on-disk schema version. Bump only alongside a migration path.
 ///
@@ -21,6 +22,8 @@ use crate::object::Object;
 /// current (see `parse`).
 /// M5 adds per-object `category`/`tags` within v2: purely additive with serde
 /// defaults, so pre-M5 v2 files load unchanged and no version bump is needed.
+/// M9 adds top-level `tilesets` within v2: same additive story - a missing
+/// field defaults to empty, so pre-M9 projects load unchanged with no bump.
 pub const FORMAT_VERSION: u32 = 2;
 
 /// Name of the manifest inside a project directory.
@@ -41,6 +44,10 @@ pub struct Project {
     /// Reusable Objects (M4). Absent in v1 files; defaults to empty on load.
     #[serde(default)]
     pub objects: Vec<Object>,
+    /// Tilesets (M9): the compile primitive. Absent in pre-M9 files; defaults
+    /// to empty on load.
+    #[serde(default)]
+    pub tilesets: Vec<Tileset>,
 }
 
 impl Project {
@@ -52,6 +59,7 @@ impl Project {
             created: now,
             modified: now,
             objects: Vec::new(),
+            tilesets: Vec::new(),
         }
     }
 }
@@ -221,6 +229,33 @@ mod tests {
         assert_eq!(project.objects.len(), 1);
         assert_eq!(project.objects[0].category, "");
         assert!(project.objects[0].tags.is_empty());
+    }
+
+    #[test]
+    fn parse_pre_m9_file_defaults_empty_tilesets() {
+        // A v2 manifest written before M9 has no `tilesets` field.
+        let json = r#"{"format_version":2,"name":"P","created":1,"modified":2,
+            "objects":[{"id":"a","name":"Tree","width":32,"height":48,"anchor":{"x":16,"y":48}}]}"#;
+        let project = parse(json).unwrap();
+        assert!(project.tilesets.is_empty());
+        assert_eq!(project.format_version, FORMAT_VERSION);
+    }
+
+    #[test]
+    fn project_with_tilesets_round_trips() {
+        use crate::tileset::Tileset;
+        let loc = temp_dir("tilesets");
+        let op = create(loc.to_str().unwrap(), "P").unwrap();
+        let mut edited = op.project.clone();
+        let mut ts = Tileset::new("Forest");
+        ts.members = vec!["a".into(), "b".into()];
+        edited.tilesets.push(ts.clone());
+        save(&op.path, edited).unwrap();
+
+        let back = read(&op.path).unwrap();
+        assert_eq!(back.project.tilesets.len(), 1);
+        assert_eq!(back.project.tilesets[0].name, "Forest");
+        assert_eq!(back.project.tilesets[0].members, vec!["a", "b"]);
     }
 
     #[test]

@@ -8,6 +8,8 @@ import type {
   Occlusion,
   OpenProject,
   Recent,
+  Tileset,
+  TilesetBudget,
 } from '../lib/api';
 import { useCanvasStore } from './canvas';
 import { useHistory } from './history';
@@ -42,6 +44,11 @@ type ProjectState = {
   selectedObjectId: string | null;
   importing: boolean;
 
+  // Which Tileset is open in the Builder (center region). Mutually exclusive
+  // with an object selection: opening one clears the other. View state, not
+  // undoable.
+  selectedTilesetId: string | null;
+
   loadRecents: () => Promise<void>;
   createProject: (location: string, name: string) => Promise<void>;
   openProject: (dir: string) => Promise<void>;
@@ -68,6 +75,21 @@ type ProjectState = {
   // engine reports the pixel indices a stroke touched and whether they become
   // occluding (true) or erased (false).
   paintOcclusion: (id: string, indices: number[], occluding: boolean) => void;
+
+  // Tileset CRUD + membership (M9). All undoable, all through autosave. A
+  // Tileset owns no files, so these are plain list edits (no Rust round-trip
+  // except minting the UUID, for parity with Object import).
+  selectTileset: (id: string | null) => void;
+  createTileset: () => Promise<void>;
+  renameTileset: (id: string, name: string) => void;
+  deleteTileset: (id: string) => void;
+  addTilesetMember: (tilesetId: string, objectId: string) => void;
+  removeTilesetMember: (tilesetId: string, objectId: string) => void;
+
+  // Persist the project, then compute the Tier 2 budget for a tileset. Saving
+  // first is required: the Rust budget command reads member artwork and the
+  // saved membership from disk, so it must see the latest state.
+  computeTilesetBudget: (tilesetId: string) => Promise<TilesetBudget>;
 };
 
 export const useProjectStore = create<ProjectState>((set, get) => {
@@ -195,11 +217,71 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     });
   };
 
+  // --- Tileset list mutators, paralleling the object ones. Tilesets live in
+  // open.project.tilesets, so editing them and saving persists in one write.
+
+  const addTileset = (tileset: Tileset) =>
+    set((s) =>
+      s.open
+        ? {
+            open: {
+              ...s.open,
+              project: {
+                ...s.open.project,
+                tilesets: [...s.open.project.tilesets, tileset],
+              },
+            },
+          }
+        : s,
+    );
+
+  const insertTilesetAt = (tileset: Tileset, index: number) =>
+    set((s) => {
+      if (!s.open) return s;
+      const tilesets = [...s.open.project.tilesets];
+      tilesets.splice(index, 0, tileset);
+      return { open: { ...s.open, project: { ...s.open.project, tilesets } } };
+    });
+
+  const removeTileset = (id: string) => {
+    set((s) =>
+      s.open
+        ? {
+            open: {
+              ...s.open,
+              project: {
+                ...s.open.project,
+                tilesets: s.open.project.tilesets.filter((t) => t.id !== id),
+              },
+            },
+          }
+        : s,
+    );
+    if (get().selectedTilesetId === id) set({ selectedTilesetId: null });
+  };
+
+  const patchTileset = (id: string, patch: Partial<Tileset>) =>
+    set((s) =>
+      s.open
+        ? {
+            open: {
+              ...s.open,
+              project: {
+                ...s.open.project,
+                tilesets: s.open.project.tilesets.map((t) =>
+                  t.id === id ? { ...t, ...patch } : t,
+                ),
+              },
+            },
+          }
+        : s,
+    );
+
   // Leaving a project: drop objects, selection, undo history, and the Canvas.
   const resetSession = () => {
     useHistory.getState().clear();
     useCanvasStore.getState().clear();
-    set({ selectedObjectId: null, importing: false });
+    set({ selectedObjectId: null, selectedTilesetId: null, importing: false });
   };
 
   return {
@@ -209,6 +291,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     error: null,
     selectedObjectId: null,
     importing: false,
+    selectedTilesetId: null,
 
     loadRecents: async () => {
       try {
@@ -265,7 +348,8 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     },
 
     selectObject: async (id) => {
-      set({ selectedObjectId: id });
+      // Opening an object closes any open Tileset Builder (center is one view).
+      set({ selectedObjectId: id, selectedTilesetId: id === null ? get().selectedTilesetId : null });
       const canvas = useCanvasStore.getState();
       if (id === null) {
         canvas.setArtwork(null);
@@ -381,21 +465,43 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       const index = current.project.objects.findIndex((o) => o.id === id);
       const obj = current.project.objects[index];
       if (!obj) return;
+      // Snapshot tileset membership so a delete also scrubs the id from every
+      // Tileset (bible: an Object may belong to several) and undo restores it.
+      // Only tilesets that actually contained the id are captured/restored.
+      const affected = current.project.tilesets
+        .filter((t) => t.members.includes(id))
+        .map((t) => ({ id: t.id, members: [...t.members] }));
+
+      const scrubMembership = () => {
+        for (const t of affected) {
+          patchTileset(
+            t.id,
+            { members: t.members.filter((m) => m !== id) },
+          );
+        }
+      };
+      const restoreMembership = () => {
+        for (const t of affected) patchTileset(t.id, { members: t.members });
+      };
+
       try {
         await api.trashObject(current.path, id);
         removeObject(id);
+        scrubMembership();
         scheduleSave();
         useHistory.getState().push({
           label: 'Delete object',
           undo: async () => {
             await api.restoreObject(current.path, id);
             insertObjectAt(obj, index);
+            restoreMembership();
             scheduleSave();
             await get().selectObject(id);
           },
           redo: async () => {
             await api.trashObject(current.path, id);
             removeObject(id);
+            scrubMembership();
             scheduleSave();
           },
         });
@@ -488,6 +594,137 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       const prev: Occlusion = { pixels: before };
       const nextOcclusion: Occlusion = { pixels: after };
       commitPatch('Paint occlusion', id, { occlusion: prev }, { occlusion: nextOcclusion });
+    },
+
+    selectTileset: (id) => {
+      // Opening a Tileset closes any open object (they share the center view).
+      set({ selectedTilesetId: id });
+      if (id !== null && get().selectedObjectId !== null) {
+        set({ selectedObjectId: null });
+        useCanvasStore.getState().setArtwork(null);
+      }
+    },
+
+    createTileset: async () => {
+      const current = get().open;
+      if (!current) return;
+      const count = current.project.tilesets.length;
+      try {
+        const tileset = await api.createTileset(`Tileset ${count + 1}`);
+        addTileset(tileset);
+        scheduleSave();
+        get().selectTileset(tileset.id);
+        useHistory.getState().push({
+          label: 'Create tileset',
+          undo: () => {
+            removeTileset(tileset.id);
+            scheduleSave();
+          },
+          redo: () => {
+            addTileset(tileset);
+            scheduleSave();
+            get().selectTileset(tileset.id);
+          },
+        });
+      } catch (e) {
+        set({ error: String(e) });
+      }
+    },
+
+    renameTileset: (id, name) => {
+      const tileset = get().open?.project.tilesets.find((t) => t.id === id);
+      if (!tileset) return;
+      const next = name.trim();
+      const previous = tileset.name;
+      if (!next || next === previous) return;
+      patchTileset(id, { name: next });
+      scheduleSave();
+      useHistory.getState().push({
+        label: 'Rename tileset',
+        undo: () => {
+          patchTileset(id, { name: previous });
+          scheduleSave();
+        },
+        redo: () => {
+          patchTileset(id, { name: next });
+          scheduleSave();
+        },
+      });
+    },
+
+    deleteTileset: (id) => {
+      const current = get().open;
+      const index = current?.project.tilesets.findIndex((t) => t.id === id) ?? -1;
+      const tileset = current?.project.tilesets[index];
+      if (!tileset) return;
+      removeTileset(id);
+      scheduleSave();
+      useHistory.getState().push({
+        label: 'Delete tileset',
+        undo: () => {
+          insertTilesetAt(tileset, index);
+          scheduleSave();
+        },
+        redo: () => {
+          removeTileset(id);
+          scheduleSave();
+        },
+      });
+    },
+
+    addTilesetMember: (tilesetId, objectId) => {
+      const tileset = get().open?.project.tilesets.find((t) => t.id === tilesetId);
+      if (!tileset || tileset.members.includes(objectId)) return;
+      const previous = tileset.members;
+      const next = [...previous, objectId];
+      patchTileset(tilesetId, { members: next });
+      scheduleSave();
+      useHistory.getState().push({
+        label: 'Add to tileset',
+        undo: () => {
+          patchTileset(tilesetId, { members: previous });
+          scheduleSave();
+        },
+        redo: () => {
+          patchTileset(tilesetId, { members: next });
+          scheduleSave();
+        },
+      });
+    },
+
+    removeTilesetMember: (tilesetId, objectId) => {
+      const tileset = get().open?.project.tilesets.find((t) => t.id === tilesetId);
+      if (!tileset || !tileset.members.includes(objectId)) return;
+      const previous = tileset.members;
+      const next = previous.filter((m) => m !== objectId);
+      patchTileset(tilesetId, { members: next });
+      scheduleSave();
+      useHistory.getState().push({
+        label: 'Remove from tileset',
+        undo: () => {
+          patchTileset(tilesetId, { members: previous });
+          scheduleSave();
+        },
+        redo: () => {
+          patchTileset(tilesetId, { members: next });
+          scheduleSave();
+        },
+      });
+    },
+
+    computeTilesetBudget: async (tilesetId) => {
+      const current = get().open;
+      if (!current) throw new Error('No project open.');
+      // Persist first: the Rust budget command reads membership and member
+      // artwork from disk, so it must see the latest state. Cancel the pending
+      // debounced save (this write supersedes it).
+      if (saveTimer) {
+        clearTimeout(saveTimer);
+        saveTimer = null;
+      }
+      const project = await api.saveProject(current.path, current.project);
+      set((s) => ({ open: s.open ? { ...s.open, project } : null }));
+      return api.getTilesetBudget(current.path, tilesetId);
     },
   };
 });

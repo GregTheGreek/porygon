@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::artwork::{self, Artwork, ArtworkError};
+use crate::artwork::{self, Artwork, ArtworkError, DecodedArtwork};
 use crate::collision::Collision;
 use crate::occlusion::Occlusion;
 
@@ -178,6 +178,12 @@ pub fn restore(project_dir: &str, id: &str) -> Result<(), ObjectError> {
 pub fn read_artwork(project_dir: &str, id: &str) -> Result<Artwork, ObjectError> {
     let path = object_dir(project_dir, id).join(ARTWORK_FILE);
     artwork::read(&path.to_string_lossy()).map_err(ObjectError::Artwork)
+}
+
+/// Decode an object's artwork to RGBA pixels for the budget path (M9).
+pub fn decode_artwork(project_dir: &str, id: &str) -> Result<DecodedArtwork, ObjectError> {
+    let path = object_dir(project_dir, id).join(ARTWORK_FILE);
+    artwork::decode_rgba(&path.to_string_lossy()).map_err(ObjectError::Artwork)
 }
 
 #[cfg(test)]

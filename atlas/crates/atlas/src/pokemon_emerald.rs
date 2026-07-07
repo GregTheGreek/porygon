@@ -20,6 +20,60 @@
 
 use serde::Serialize;
 
+// --- Tileset budgets (Milestone 9) ------------------------------------------
+//
+// Every value here is a verified engine constant, not a guess. Sources:
+// `include/fieldmap.h` as tabulated in `spikes/spike0/FINDINGS.md` and restated
+// in `compiler.md` ("Engine Constraints"). Atlas targets a SECONDARY tileset
+// (Spike 0 finding 6 / compiler.md Inputs), which owns the second half of each
+// shared budget:
+//
+//   * NUM_TILES_IN_PRIMARY = 512      -> secondary owns 512 tiles.
+//   * NUM_METATILES_IN_PRIMARY = 512  -> secondary owns 512 metatiles.
+//   * NUM_PALS_TOTAL 13 - NUM_PALS_IN_PRIMARY 6 = 7 secondary palettes (6-12).
+//   * Each 8x8 tile uses one 16-colour palette: 15 usable + 1 transparency.
+//   * Geometry: 8px tiles, 16px metatiles (compiler.md "Geometry and layers").
+//
+// Porytiles PANICS (SIGABRT) when the palette budget is exceeded, so the palette
+// prediction is a hard pre-check (compiler.md "Palettes" / FINDINGS finding 3).
+
+/// Tiles a secondary tileset may emit (compiler.md "Tiles and metatiles").
+pub const SECONDARY_TILE_BUDGET: u32 = 512;
+/// Metatiles a secondary tileset may emit.
+pub const SECONDARY_METATILE_BUDGET: u32 = 512;
+/// Palette slots a secondary tileset may use (indices 6-12).
+pub const SECONDARY_PALETTE_BUDGET: u32 = 7;
+/// Usable colours in one palette (the 16th slot is transparency).
+pub const COLORS_PER_PALETTE: u32 = 15;
+/// Tile edge in pixels.
+pub const TILE_PX: u32 = 8;
+/// Metatile edge in pixels.
+pub const METATILE_PX: u32 = 16;
+/// Porytiles' transparency sentinel colour in the layer PNGs (compiler.md
+/// "Target"). A pixel of this colour consumes no palette entry.
+pub const TRANSPARENT_RGB: [u8; 3] = [255, 0, 255];
+
+/// The budgets that bound one tileset compile. Bundled so the pure budget maths
+/// (see `budgets.rs`) takes engine knowledge as data rather than reaching for
+/// module constants directly, which keeps a second engine target a drop-in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Budgets {
+    pub tiles: u32,
+    pub metatiles: u32,
+    pub palettes: u32,
+    pub colors_per_palette: u32,
+}
+
+/// The budgets for a secondary tileset (Atlas's MVP target).
+pub fn secondary_budgets() -> Budgets {
+    Budgets {
+        tiles: SECONDARY_TILE_BUDGET,
+        metatiles: SECONDARY_METATILE_BUDGET,
+        palettes: SECONDARY_PALETTE_BUDGET,
+        colors_per_palette: COLORS_PER_PALETTE,
+    }
+}
+
 /// One entry in the custom collision-tag vocabulary.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CollisionTag {
@@ -104,6 +158,16 @@ mod tests {
         behaviors.sort_unstable();
         behaviors.dedup();
         assert_eq!(behaviors.len(), tags.len(), "behaviors must be unique");
+    }
+
+    #[test]
+    fn secondary_budgets_match_verified_constants() {
+        // Guards the Spike 0 / compiler.md numbers against a careless edit.
+        let b = secondary_budgets();
+        assert_eq!(b.tiles, 512);
+        assert_eq!(b.metatiles, 512);
+        assert_eq!(b.palettes, 7);
+        assert_eq!(b.colors_per_palette, 15);
     }
 
     #[test]

@@ -14,11 +14,13 @@ use crate::collision::{grid_dims, CELL};
 use crate::object::Object;
 use crate::occlusion::pixel_count;
 
-/// Which validity tier a problem belongs to. Only `Object` (Tier 1) exists
-/// today; `Tileset`/`Export` are added with Milestones 9 and 11.
+/// Which validity tier a problem belongs to. `Object` (Tier 1) is authoring-time
+/// and fixed on the Canvas; `Tileset` (Tier 2, M9) is compile-time and fixed in
+/// the Tileset view; `Export` (Tier 3) arrives with Milestone 11.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum Tier {
     Object,
+    Tileset,
 }
 
 /// A single validity problem, in artist terms. Never engine/compiler jargon.

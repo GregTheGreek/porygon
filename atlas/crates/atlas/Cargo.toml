@@ -25,6 +25,9 @@ serde_json = "1"
 base64 = "=0.22.1"
 # Stable per-Object identity. v4 (random) is enough; we never parse or order UUIDs.
 uuid = { version = "=1.23.4", features = ["v4"] }
+# Decode stored artwork to RGBA pixels for the M9 budget path (import stays
+# header-only). Already in the tree transitively via Tauri; pinned exact.
+png = "=0.18.1"
 
 [lints]
 workspace = true

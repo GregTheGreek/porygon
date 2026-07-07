@@ -1,12 +1,14 @@
 // Tauri 2 entry point for the Porygon desktop shell.
 
 mod artwork;
+mod budgets;
 mod collision;
 mod object;
 mod occlusion;
 mod pokemon_emerald;
 mod project;
 mod recents;
+mod tileset;
 mod validity;
 
 use std::path::PathBuf;
@@ -14,10 +16,12 @@ use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
 
 use artwork::Artwork;
+use budgets::TilesetBudget;
 use object::Object;
 use pokemon_emerald::CollisionTag;
 use project::{OpenProject, Project};
 use recents::Recent;
+use tileset::Tileset;
 use validity::Problem;
 
 /// Returns the crate version. Wired end-to-end to prove the IPC bridge; the
@@ -126,6 +130,25 @@ fn object_problems(object: Object) -> Vec<Problem> {
     validity::object_problems(&object)
 }
 
+/// Mint a fresh, empty Tileset (new UUID, given name). Id generation lives in
+/// Rust for parity with Objects (import mints the object UUID); the frontend
+/// adds the returned Tileset to project.json and saves, and owns the rest of
+/// tileset CRUD as plain undoable list edits (a Tileset owns no files on disk).
+#[tauri::command]
+fn create_tileset(name: String) -> Tileset {
+    Tileset::new(&name)
+}
+
+/// Tier 2 (Tileset) budget prediction for one tileset, in artist terms. Reads
+/// the tileset's member artwork from disk and returns palette/tile/metatile
+/// meters plus any budget problems. This is the mandatory palette pre-check:
+/// exceeding the palette budget crashes Porytiles, so Atlas predicts it here
+/// before any compile ever runs.
+#[tauri::command]
+fn tileset_budget(project_path: String, tileset_id: String) -> Result<TilesetBudget, String> {
+    budgets::compute_for_tileset(&project_path, &tileset_id)
+}
+
 #[tauri::command]
 fn get_recent_projects(app: AppHandle) -> Result<Vec<Recent>, String> {
     let file = recents_file(&app)?;
@@ -151,6 +174,8 @@ pub fn run() {
             read_object_artwork,
             collision_tags,
             object_problems,
+            create_tileset,
+            tileset_budget,
             get_recent_projects
         ])
         .run(tauri::generate_context!())
