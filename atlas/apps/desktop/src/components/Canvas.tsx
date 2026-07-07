@@ -2,12 +2,13 @@ import { useEffect, useRef, useState } from 'react';
 import { CanvasEngine } from '../canvas/CanvasEngine';
 import { useCanvasStore } from '../store/canvas';
 import { useProjectStore } from '../store/project';
-import { CollisionControls } from './CollisionControls';
+import { LayerControls } from './LayerControls';
 import type { CollisionValue } from '../lib/api';
 
-// Stable empty map for objects/selections with no painted collision, so the
-// selector below never returns a fresh reference and loops renders.
+// Stable empty map/array for selections with no painted collision/occlusion, so
+// the selectors below never return a fresh reference and loop renders.
 const NO_CELLS: Record<string, CollisionValue> = {};
+const NO_PIXELS: number[] = [];
 
 // The center region. React only mounts the Pixi world and plumbs props; all
 // rendering, zoom, pan, grid, and selection live in CanvasEngine.
@@ -37,9 +38,21 @@ export function Canvas() {
         NO_CELLS
       : NO_CELLS,
   );
+  // The selected Object's occlusion pixels drive the occlusion overlay. Stable
+  // until edited, like the collision selector above.
+  const occlusionPixels = useProjectStore((s) =>
+    s.open && s.selectedObjectId
+      ? s.open.project.objects.find((o) => o.id === s.selectedObjectId)?.occlusion.pixels ??
+        NO_PIXELS
+      : NO_PIXELS,
+  );
   const paintMode = useCanvasStore((s) => s.paintMode);
   const collisionVisible = useCanvasStore((s) => s.collisionVisible);
   const paintValue = useCanvasStore((s) => s.paintValue);
+  const occlusionVisible = useCanvasStore((s) => s.occlusionVisible);
+  const occlusionErase = useCanvasStore((s) => s.occlusionErase);
+  const occlusionBrushSize = useCanvasStore((s) => s.occlusionBrushSize);
+  const previewEnabled = useCanvasStore((s) => s.previewEnabled);
 
   const [zoom, setZoom] = useState(100);
   const [show8, setShow8] = useState(false);
@@ -66,6 +79,12 @@ export function Canvas() {
             store.paintCollision(store.selectedObjectId, indices, value);
           }
         },
+        onOcclusionStroke: (indices, occluding) => {
+          const store = useProjectStore.getState();
+          if (store.selectedObjectId) {
+            store.paintOcclusion(store.selectedObjectId, indices, occluding);
+          }
+        },
       })
       .then(() => {
         if (disposed) {
@@ -85,13 +104,17 @@ export function Canvas() {
         engine.setPaintMode(canvas.paintMode);
         engine.setCollisionVisible(canvas.collisionVisible);
         engine.setActiveCollisionValue(canvas.paintValue);
+        engine.setOcclusionVisible(canvas.occlusionVisible);
+        engine.setOcclusionErase(canvas.occlusionErase);
+        engine.setOcclusionBrushSize(canvas.occlusionBrushSize);
+        engine.setPreview(canvas.previewEnabled);
         const project = useProjectStore.getState();
-        const selectedCells =
+        const selected =
           project.open && project.selectedObjectId
             ? project.open.project.objects.find((o) => o.id === project.selectedObjectId)
-                ?.collision.cells ?? NO_CELLS
-            : NO_CELLS;
-        engine.setCollision(selectedCells);
+            : undefined;
+        engine.setCollision(selected?.collision.cells ?? NO_CELLS);
+        engine.setOcclusion(selected?.occlusion.pixels ?? NO_PIXELS);
         if (canvas.artwork) void engine.loadArtwork(canvas.artwork);
       })
       .catch((e: unknown) => {
@@ -143,6 +166,25 @@ export function Canvas() {
     engineRef.current?.setActiveCollisionValue(paintValue);
   }, [paintValue]);
 
+  // Push occlusion + preview state into the engine, mirroring the collision
+  // plumbing above. Overlay updates immediately on paint, undo/redo, selection
+  // change, and every toggle.
+  useEffect(() => {
+    engineRef.current?.setOcclusion(occlusionPixels);
+  }, [occlusionPixels]);
+  useEffect(() => {
+    engineRef.current?.setOcclusionVisible(occlusionVisible);
+  }, [occlusionVisible]);
+  useEffect(() => {
+    engineRef.current?.setOcclusionErase(occlusionErase);
+  }, [occlusionErase]);
+  useEffect(() => {
+    engineRef.current?.setOcclusionBrushSize(occlusionBrushSize);
+  }, [occlusionBrushSize]);
+  useEffect(() => {
+    engineRef.current?.setPreview(previewEnabled);
+  }, [previewEnabled]);
+
   const hasArtwork = artwork !== null;
 
   return (
@@ -152,7 +194,7 @@ export function Canvas() {
           <span className="font-medium uppercase tracking-wide text-fg-muted">
             Canvas
           </span>
-          {hasArtwork && <CollisionControls />}
+          {hasArtwork && <LayerControls />}
         </div>
         <div className="flex items-center gap-1 text-xs">
           <GridToggle label="8" title="Toggle 8px tile grid" active={show8} onClick={() => setShow8((v) => !v)} />

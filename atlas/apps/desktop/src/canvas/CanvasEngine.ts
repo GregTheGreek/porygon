@@ -13,7 +13,7 @@ import {
 import { drawGrid, type GridConfig } from './grid';
 import type { CollisionValue } from '../lib/api';
 
-export type PaintMode = 'select' | 'collision';
+export type PaintMode = 'select' | 'collision' | 'occlusion';
 
 export type CanvasCallbacks = {
   /** Current zoom as a percentage (100 = 1:1). */
@@ -26,6 +26,13 @@ export type CanvasCallbacks = {
    * React turns this into one undoable store mutation.
    */
   onCollisionStroke: (indices: number[], value: CollisionValue) => void;
+  /**
+   * An occlusion brush stroke finished. `indices` are the row-major *pixel*
+   * indices whose state actually changed; `occluding` is true when the stroke
+   * added occlusion and false when it erased. React turns this into one undoable
+   * store mutation (mirrors onCollisionStroke).
+   */
+  onOcclusionStroke: (indices: number[], occluding: boolean) => void;
 };
 
 export type ArtworkInput = {
@@ -61,7 +68,31 @@ const COLLISION_ALPHA = 0.4;
 const BLOCKED_COLOR = 0xff3b30; // red: cannot walk here
 const CUSTOM_COLOR = 0x00b8d4; // teal: a semantic tag (tall grass, water, ...)
 
+// Occlusion overlay: a per-pixel tint distinct from every other overlay hue
+// (collision red/teal, selection purple, anchor orange) so the two paint layers
+// never read as the same thing. Magenta/pink = "renders above the player".
+const OCCLUSION_TINT: [number, number, number] = [0xff, 0x3e, 0xa5];
+const OCCLUSION_TINT_ALPHA = 150; // 0-255, applied per pixel in the tint canvas
+// Preview player marker: 16x32 (one metatile wide, two tall) matching Emerald's
+// overworld sprite footprint, standing on the 16x16 cell under the cursor.
+const PLAYER_W = 16;
+const PLAYER_H = 32;
+const PLAYER_FILL = 0x3d7bff;
+const PLAYER_ALPHA = 0.85;
+
 const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
+
+// Decode an already-loaded image into raw RGBA pixels via an offscreen 2D
+// canvas, so the occlusion preview can read the artwork's real pixels.
+function readImagePixels(img: HTMLImageElement, width: number, height: number): ImageData | null {
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+  ctx.drawImage(img, 0, 0);
+  return ctx.getImageData(0, 0, width, height);
+}
 
 // Whether two collision values are equal (handles the Custom tag object).
 function collisionValueEq(
@@ -78,12 +109,21 @@ function collisionValueEq(
  *
  * Layout of the scene:
  *   stage
- *     background     - checkerboard, screen space, never scaled
- *     world          - carries pan (position) + zoom (scale)
- *       sprite       - the artwork, nearest-neighbor sampled
- *     collisionLayer - collision tint per 16px cell, screen space
- *     gridLayer      - grid lines, redrawn in screen space (crisp 1px)
- *     overlay        - selection outline + anchor crosshair, screen space
+ *     background      - checkerboard, screen space, never scaled
+ *     world           - carries pan (position) + zoom (scale)
+ *       sprite        - the artwork (child 0, below everything)
+ *       occlusionTint - per-pixel occlusion tint (authoring aid)
+ *       previewPlayer - the player-sized preview marker (below the top layer)
+ *       previewTop    - real occluding artwork pixels, drawn over the player
+ *     collisionLayer  - collision tint per 16px cell, screen space
+ *     gridLayer       - grid lines, redrawn in screen space (crisp 1px)
+ *     overlay         - selection outline + anchor crosshair, screen space
+ *
+ * The occlusion and preview layers live inside `world` (not screen space like
+ * collision) so they track pan/zoom automatically and align to artwork pixels;
+ * they are rebuilt only when the mask, preview state, or cursor cell changes,
+ * never per pan/zoom. Their z-order in `world` is the whole point of the
+ * preview: player between the below-player artwork and the above-player pixels.
  */
 export class CanvasEngine {
   private app!: Application;
@@ -93,9 +133,20 @@ export class CanvasEngine {
   private gridLayer!: Graphics;
   private overlay!: Graphics;
 
+  // World-space occlusion + preview layers (created once in init).
+  private occlusionTint!: Sprite;
+  private previewPlayer!: Graphics;
+  private previewTop!: Sprite;
+  // Textures we own and must destroy on rebuild (Sprite defaults to EMPTY).
+  private occlusionTintTexture: Texture | null = null;
+  private previewTopTexture: Texture | null = null;
+
   private sprite: Sprite | null = null;
   private artW = 0;
   private artH = 0;
+  // The decoded artwork's pixels, kept so the preview can rebuild the real
+  // above-player ("top layer") image from the mask. Null until artwork loads.
+  private artworkPixels: ImageData | null = null;
 
   private grid: GridConfig = { show8: false, show16: false };
   private selected = false;
@@ -109,9 +160,23 @@ export class CanvasEngine {
   private collisionVisible = true;
   private paintMode: PaintMode = 'select';
   private paintValue: CollisionValue = 'Blocked';
-  // Active stroke: the pointer we captured and the cells it actually changed.
+
+  // Occlusion state. `occlusionPixels` is the engine's render copy of the sparse
+  // pixel set (row-major index); React pushes it via setOcclusion and it is
+  // mutated locally during a stroke for immediate feedback.
+  private occlusionPixels = new Set<number>();
+  private occlusionVisible = true;
+  private occlusionErase = false;
+  private occlusionBrushSize = 4;
+  private previewEnabled = false;
+  // The grid cell (col,row) under the cursor for the preview marker; null hides.
+  private previewCell: { col: number; row: number } | null = null;
+
+  // Active stroke: the pointer we captured, the layer it paints, and the cells
+  // or pixels it actually changed.
   private painting = false;
   private paintPointerId = -1;
+  private strokeMode: 'collision' | 'occlusion' = 'collision';
   private strokeChanges = new Set<number>();
 
   private viewportW = 0;
@@ -156,6 +221,16 @@ export class CanvasEngine {
       height: this.viewportH,
     });
     this.world = new Container();
+    // World-space occlusion + preview layers, in z-order (artwork is inserted
+    // at index 0 in loadArtwork so it stays beneath these).
+    this.occlusionTint = new Sprite();
+    this.previewPlayer = new Graphics();
+    this.previewTop = new Sprite();
+    this.occlusionTint.visible = false;
+    this.previewPlayer.visible = false;
+    this.previewTop.visible = false;
+    this.world.addChild(this.occlusionTint, this.previewPlayer, this.previewTop);
+
     this.collisionLayer = new Graphics();
     this.gridLayer = new Graphics();
     this.overlay = new Graphics();
@@ -203,15 +278,21 @@ export class CanvasEngine {
     }
     this.sprite = new Sprite(texture);
     this.sprite.roundPixels = true;
-    this.world.addChild(this.sprite);
+    // Index 0: the artwork sits beneath the occlusion/preview layers so the
+    // preview's top layer can render over the player.
+    this.world.addChildAt(this.sprite, 0);
 
     this.artW = art.width;
     this.artH = art.height;
+    // Grab the raw pixels so the preview can reconstruct the above-player layer
+    // (the real artwork pixels under the mask). Kept until the next artwork load.
+    this.artworkPixels = readImagePixels(img, art.width, art.height);
     this.setSelected(false);
     this.fit();
     // fit() redraws the grid/overlay; the collision tint depends on artW/artH
     // now being set, so draw it once the artwork size is known.
     this.drawCollisionLayer();
+    this.refreshOcclusion();
   }
 
   clearArtwork(): void {
@@ -222,8 +303,12 @@ export class CanvasEngine {
     }
     this.artW = 0;
     this.artH = 0;
+    this.artworkPixels = null;
+    this.previewCell = null;
     this.setSelected(false);
     this.redraw();
+    this.drawCollisionLayer();
+    this.refreshOcclusion();
   }
 
   setGrid(config: GridConfig): void {
@@ -255,6 +340,37 @@ export class CanvasEngine {
   /** Set the value the collision brush paints ('Walkable' erases). */
   setActiveCollisionValue(value: CollisionValue): void {
     this.paintValue = value;
+  }
+
+  /** Replace the occlusion mask to render (row-major pixel indices). */
+  setOcclusion(pixels: number[]): void {
+    this.occlusionPixels = new Set(pixels);
+    this.refreshOcclusion();
+  }
+
+  /** Show or hide the occlusion tint, independent of paint mode and preview. */
+  setOcclusionVisible(visible: boolean): void {
+    if (this.occlusionVisible === visible) return;
+    this.occlusionVisible = visible;
+    this.refreshOcclusion();
+  }
+
+  /** Whether the occlusion brush erases occluding pixels rather than paints. */
+  setOcclusionErase(erase: boolean): void {
+    this.occlusionErase = erase;
+  }
+
+  /** Set the occlusion brush's square side in artwork pixels. */
+  setOcclusionBrushSize(size: number): void {
+    this.occlusionBrushSize = Math.max(1, Math.round(size));
+  }
+
+  /** Toggle the player-sized preview marker and its above-player top layer. */
+  setPreview(enabled: boolean): void {
+    if (this.previewEnabled === enabled) return;
+    this.previewEnabled = enabled;
+    this.refreshOcclusion();
+    this.drawPreviewPlayer();
   }
 
   /** Show a crosshair at the anchor (artwork pixels); null hides it. */
@@ -466,10 +582,11 @@ export class CanvasEngine {
       e.preventDefault();
       return;
     }
-    // Collision mode: left-drag paints. (Space+left already panned above, so
+    // Paint mode: left-drag paints. (Space+left already panned above, so
     // panning still works while painting.)
-    if (this.paintMode === 'collision' && e.button === 0) {
+    if ((this.paintMode === 'collision' || this.paintMode === 'occlusion') && e.button === 0) {
       this.painting = true;
+      this.strokeMode = this.paintMode;
       this.paintPointerId = e.pointerId;
       this.strokeChanges.clear();
       this.canvas.setPointerCapture(e.pointerId);
@@ -491,6 +608,8 @@ export class CanvasEngine {
     if (this.painting && e.pointerId === this.paintPointerId) {
       this.paintAt(e);
     }
+    // Track the cursor cell so the preview marker follows the pointer.
+    if (this.previewEnabled) this.updatePreviewCell(e);
   };
 
   private onPointerUp = (e: PointerEvent): void => {
@@ -505,9 +624,14 @@ export class CanvasEngine {
       this.painting = false;
       this.paintPointerId = -1;
       this.canvas.releasePointerCapture(e.pointerId);
-      // One command per stroke: report only the cells that actually changed.
+      // One command per stroke: report only the cells/pixels that actually
+      // changed, to the layer this stroke was painting.
       if (this.strokeChanges.size > 0) {
-        this.callbacks.onCollisionStroke([...this.strokeChanges], this.paintValue);
+        if (this.strokeMode === 'collision') {
+          this.callbacks.onCollisionStroke([...this.strokeChanges], this.paintValue);
+        } else {
+          this.callbacks.onOcclusionStroke([...this.strokeChanges], !this.occlusionErase);
+        }
       }
       this.strokeChanges.clear();
       return;
@@ -605,10 +729,47 @@ export class CanvasEngine {
     return row * cols + col;
   }
 
+  // The integer artwork pixel under a pointer event, or null if outside.
+  private artPixelAt(e: { clientX: number; clientY: number }): { x: number; y: number } | null {
+    if (!this.sprite) return null;
+    const p = this.localPoint(e);
+    const scale = this.world.scale.x;
+    const wx = Math.floor((p.x - this.world.x) / scale);
+    const wy = Math.floor((p.y - this.world.y) / scale);
+    if (wx < 0 || wy < 0 || wx >= this.artW || wy >= this.artH) return null;
+    return { x: wx, y: wy };
+  }
+
+  // Update the 16px grid cell the preview marker stands on, redrawing only when
+  // it changes. The marker snaps to the metatile cell under the cursor.
+  private updatePreviewCell(e: { clientX: number; clientY: number }): void {
+    if (!this.sprite) return;
+    const p = this.localPoint(e);
+    const scale = this.world.scale.x;
+    const wx = (p.x - this.world.x) / scale;
+    const wy = (p.y - this.world.y) / scale;
+    const next =
+      wx < 0 || wy < 0 || wx >= this.artW || wy >= this.artH
+        ? null
+        : { col: Math.floor(wx / COLLISION_CELL), row: Math.floor(wy / COLLISION_CELL) };
+    const changed =
+      (next === null) !== (this.previewCell === null) ||
+      (next && this.previewCell && (next.col !== this.previewCell.col || next.row !== this.previewCell.row));
+    if (!changed) return;
+    this.previewCell = next;
+    this.drawPreviewPlayer();
+  }
+
+  // Dispatch a paint sample to the layer the active stroke is painting.
+  private paintAt(e: PointerEvent): void {
+    if (this.strokeMode === 'occlusion') this.paintOcclusionAt(e);
+    else this.paintCollisionAt(e);
+  }
+
   // Paint the active value onto the cell under the pointer, updating the local
   // render copy for immediate feedback and recording cells that actually change
   // (so the stroke's undo command carries only real changes).
-  private paintAt(e: PointerEvent): void {
+  private paintCollisionAt(e: PointerEvent): void {
     const cell = this.cellAt(e);
     if (cell === null) return;
     const current = this.collisionCells.get(cell);
@@ -619,6 +780,36 @@ export class CanvasEngine {
     this.drawCollisionLayer();
   }
 
+  // Paint (or erase) a square brush of occluding pixels centered on the pointer,
+  // recording only pixels whose state actually flips so the stroke's undo
+  // command carries only real changes. Pixel-level, matching occlusion.rs.
+  private paintOcclusionAt(e: PointerEvent): void {
+    const pt = this.artPixelAt(e);
+    if (!pt) return;
+    const size = this.occlusionBrushSize;
+    const start = -Math.floor((size - 1) / 2);
+    let changed = false;
+    for (let dy = 0; dy < size; dy++) {
+      for (let dx = 0; dx < size; dx++) {
+        const x = pt.x + start + dx;
+        const y = pt.y + start + dy;
+        if (x < 0 || y < 0 || x >= this.artW || y >= this.artH) continue;
+        const idx = y * this.artW + x;
+        const has = this.occlusionPixels.has(idx);
+        if (this.occlusionErase) {
+          if (!has) continue;
+          this.occlusionPixels.delete(idx);
+        } else {
+          if (has) continue;
+          this.occlusionPixels.add(idx);
+        }
+        this.strokeChanges.add(idx);
+        changed = true;
+      }
+    }
+    if (changed) this.refreshOcclusion();
+  }
+
   private setCursor(cursor: string): void {
     this.canvas.style.cursor = cursor;
   }
@@ -626,11 +817,94 @@ export class CanvasEngine {
   private updateCursor(): void {
     if (this.spaceDown) {
       this.setCursor('grab');
-    } else if (this.paintMode === 'collision') {
+    } else if (this.paintMode === 'collision' || this.paintMode === 'occlusion') {
       this.setCursor('crosshair');
     } else {
       this.setCursor('default');
     }
+  }
+
+  // Rebuild the occlusion tint (authoring overlay) and the preview top layer
+  // (real above-player pixels) from the current mask, then set their
+  // visibility. Called on mask edits, visibility/preview toggles, and load.
+  private refreshOcclusion(): void {
+    const hasArt = this.sprite !== null && this.artW > 0;
+    const hasPixels = this.occlusionPixels.size > 0;
+
+    if (this.occlusionTintTexture) {
+      this.occlusionTintTexture.destroy(true);
+      this.occlusionTintTexture = null;
+    }
+    if (hasArt && hasPixels && this.occlusionVisible) {
+      this.occlusionTintTexture = this.textureFromMask((p, src) => {
+        src[p] = OCCLUSION_TINT[0];
+        src[p + 1] = OCCLUSION_TINT[1];
+        src[p + 2] = OCCLUSION_TINT[2];
+        src[p + 3] = OCCLUSION_TINT_ALPHA;
+      });
+      this.occlusionTint.texture = this.occlusionTintTexture;
+      this.occlusionTint.visible = true;
+    } else {
+      this.occlusionTint.texture = Texture.EMPTY;
+      this.occlusionTint.visible = false;
+    }
+
+    if (this.previewTopTexture) {
+      this.previewTopTexture.destroy(true);
+      this.previewTopTexture = null;
+    }
+    // The preview's above-player layer is the real artwork pixels under the
+    // mask - honest to compiler.md (occluding pixels -> top.png). A pixel that
+    // is transparent in the artwork stays transparent here.
+    const art = this.artworkPixels;
+    if (hasArt && hasPixels && this.previewEnabled && art) {
+      this.previewTopTexture = this.textureFromMask((p, out) => {
+        out[p] = art.data[p] ?? 0;
+        out[p + 1] = art.data[p + 1] ?? 0;
+        out[p + 2] = art.data[p + 2] ?? 0;
+        out[p + 3] = art.data[p + 3] ?? 0;
+      });
+      this.previewTop.texture = this.previewTopTexture;
+      this.previewTop.visible = true;
+    } else {
+      this.previewTop.texture = Texture.EMPTY;
+      this.previewTop.visible = false;
+    }
+  }
+
+  // Build an artwork-sized texture, writing `paint` into each occluding pixel
+  // (leaving the rest transparent). Nearest sampling keeps it crisp when the
+  // world scales. The caller owns destroying the returned texture.
+  private textureFromMask(paint: (offset: number, data: Uint8ClampedArray) => void): Texture {
+    const canvas = document.createElement('canvas');
+    canvas.width = this.artW;
+    canvas.height = this.artH;
+    const ctx = canvas.getContext('2d')!;
+    const img = ctx.createImageData(this.artW, this.artH);
+    for (const idx of this.occlusionPixels) {
+      if (idx >= this.artW * this.artH) continue; // ignore any stale index
+      paint(idx * 4, img.data);
+    }
+    ctx.putImageData(img, 0, 0);
+    const tex = Texture.from(canvas);
+    tex.source.scaleMode = 'nearest';
+    return tex;
+  }
+
+  // Draw the player-sized preview marker in world space at the cursor cell. It
+  // stands on the 16x16 cell (bottom) and rises one cell above it (16x32).
+  private drawPreviewPlayer(): void {
+    this.previewPlayer.clear();
+    if (!this.sprite || !this.previewEnabled || !this.previewCell) {
+      this.previewPlayer.visible = false;
+      return;
+    }
+    const x = this.previewCell.col * COLLISION_CELL;
+    const y = this.previewCell.row * COLLISION_CELL - (PLAYER_H - COLLISION_CELL);
+    this.previewPlayer
+      .rect(x, y, PLAYER_W, PLAYER_H)
+      .fill({ color: PLAYER_FILL, alpha: PLAYER_ALPHA });
+    this.previewPlayer.visible = true;
   }
 
   private makeCheckerTexture(): Texture {

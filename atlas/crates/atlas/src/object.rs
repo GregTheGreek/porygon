@@ -18,6 +18,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::artwork::{self, Artwork, ArtworkError};
 use crate::collision::Collision;
+use crate::occlusion::Occlusion;
 
 /// The metatile grid the anchor snaps to, in pixels.
 pub const GRID: u32 = 16;
@@ -42,10 +43,10 @@ pub fn snap(value: u32) -> u32 {
 
 /// A reusable authoring Object. Metadata only; the artwork lives on disk.
 ///
-/// `category`/`tags` (M5) and `collision` (M6) are additive with serde
-/// defaults, so pre-M5/M6 files load cleanly without a format_version bump (same
-/// rationale as project.rs): a missing field defaults, and the next save writes
-/// the current shape.
+/// `category`/`tags` (M5), `collision` (M6), and `occlusion` (M7) are additive
+/// with serde defaults, so pre-M5/M6/M7 files load cleanly without a
+/// format_version bump (same rationale as project.rs): a missing field defaults,
+/// and the next save writes the current shape.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Object {
     pub id: String,
@@ -63,6 +64,11 @@ pub struct Object {
     /// Walkable. Defaults empty for objects saved before M6.
     #[serde(default)]
     pub collision: Collision,
+    /// Painted occlusion at pixel granularity (M7). Sparse; empty means the
+    /// whole object renders in front of the player. Defaults empty for objects
+    /// saved before M7.
+    #[serde(default)]
+    pub occlusion: Occlusion,
 }
 
 impl Object {
@@ -81,6 +87,7 @@ impl Object {
             category: String::new(),
             tags: Vec::new(),
             collision: Collision::default(),
+            occlusion: Occlusion::default(),
         }
     }
 
@@ -235,6 +242,27 @@ mod tests {
             "anchor":{"x":16,"y":48},"category":"Nature","tags":["tree"]}"#;
         let o: Object = serde_json::from_str(json).unwrap();
         assert!(o.collision.cells.is_empty());
+    }
+
+    #[test]
+    fn pre_m7_object_json_defaults_empty_occlusion() {
+        // Objects saved before M7 lack `occlusion`; it must default to empty so
+        // older projects load without a format_version bump.
+        let json = r#"{"id":"a","name":"Tree","width":32,"height":48,
+            "anchor":{"x":16,"y":48},"category":"Nature","tags":["tree"],
+            "collision":{"cells":{"0":"Blocked"}}}"#;
+        let o: Object = serde_json::from_str(json).unwrap();
+        assert!(o.occlusion.pixels.is_empty());
+    }
+
+    #[test]
+    fn object_with_occlusion_round_trips() {
+        let mut o = Object::new("Tree", 32, 48);
+        o.occlusion.pixels.insert(0);
+        o.occlusion.pixels.insert(69);
+        let json = serde_json::to_string(&o).unwrap();
+        let back: Object = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, o);
     }
 
     #[test]

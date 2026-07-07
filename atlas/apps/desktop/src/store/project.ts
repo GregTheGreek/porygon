@@ -5,6 +5,7 @@ import type {
   AtlasObject,
   Collision,
   CollisionValue,
+  Occlusion,
   OpenProject,
   Recent,
 } from '../lib/api';
@@ -62,6 +63,11 @@ type ProjectState = {
   // Collision painting (M6). One command per brush stroke; the Canvas engine
   // reports the cells a stroke touched and the value to apply.
   paintCollision: (id: string, indices: number[], value: CollisionValue) => void;
+
+  // Occlusion painting (M7). Same stroke-batched shape as collision; the Canvas
+  // engine reports the pixel indices a stroke touched and whether they become
+  // occluding (true) or erased (false).
+  paintOcclusion: (id: string, indices: number[], occluding: boolean) => void;
 };
 
 export const useProjectStore = create<ProjectState>((set, get) => {
@@ -459,6 +465,29 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       const prev: Collision = { cells: before };
       const nextCollision: Collision = { cells: after };
       commitPatch('Paint collision', id, { collision: prev }, { collision: nextCollision });
+    },
+
+    paintOcclusion: (id, indices, occluding) => {
+      const obj = get().open?.project.objects.find((o) => o.id === id);
+      if (!obj || indices.length === 0) return;
+
+      // A stroke is one undo step: snapshot the sparse pixel set, apply every
+      // touched pixel, and commit before/after as a single command (mirrors
+      // paintCollision). The set holds only occluding pixels, so adding puts an
+      // index in and erasing removes it.
+      const before = obj.occlusion?.pixels ?? [];
+      const set = new Set(before);
+      for (const i of indices) {
+        if (occluding) set.add(i);
+        else set.delete(i);
+      }
+      // Sort so the payload is stable regardless of stroke order; Rust's
+      // BTreeSet normalises anyway, but a stable array keeps undo/redo diffs tidy.
+      const after = [...set].sort((a, b) => a - b);
+
+      const prev: Occlusion = { pixels: before };
+      const nextOcclusion: Occlusion = { pixels: after };
+      commitPatch('Paint occlusion', id, { occlusion: prev }, { occlusion: nextOcclusion });
     },
   };
 });

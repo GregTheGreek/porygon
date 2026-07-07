@@ -3,6 +3,7 @@
 mod artwork;
 mod collision;
 mod object;
+mod occlusion;
 mod pokemon_emerald;
 mod project;
 mod recents;

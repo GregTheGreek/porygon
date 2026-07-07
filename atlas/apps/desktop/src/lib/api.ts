@@ -19,6 +19,11 @@ export type CollisionValue = 'Walkable' | 'Blocked' | { Custom: string };
 // row-major cell index (as a string, since JSON object keys are strings).
 export type Collision = { cells: Record<string, CollisionValue> };
 
+// Painted occlusion at pixel granularity. Mirrors Occlusion in crates/atlas/src/
+// occlusion.rs (serde BTreeSet<u32> -> JSON array). Sparse: only occluding pixel
+// indices (row-major y*width+x). Absence means "renders in front of the player".
+export type Occlusion = { pixels: number[] };
+
 // A reusable authoring Object. Metadata only; artwork pixels live on disk under
 // the project's `objects/<id>/` directory and are fetched via readObjectArtwork.
 export type AtlasObject = {
@@ -30,6 +35,7 @@ export type AtlasObject = {
   category: string;
   tags: string[];
   collision: Collision;
+  occlusion: Occlusion;
 };
 
 // One entry in the engine's custom collision-tag vocabulary (from the
