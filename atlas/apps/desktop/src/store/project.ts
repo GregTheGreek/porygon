@@ -153,6 +153,16 @@ type ProjectState = {
   duplicateObject: (id: string) => Promise<void>;
   deleteObject: (id: string) => Promise<void>;
 
+  // Variant edits (M13). All undoable, all through autosave. Only artwork
+  // differs between variants; switching one changes the active artwork on the
+  // canvas and everything downstream (budgets, export, play). Import/duplicate
+  // touch the filesystem via Rust; switch/rename/delete are metadata edits.
+  addVariant: (objectId: string) => Promise<void>;
+  duplicateVariant: (objectId: string, variantId: string) => Promise<void>;
+  switchVariant: (objectId: string, variantId: string) => void;
+  renameVariant: (objectId: string, variantId: string, name: string) => void;
+  deleteVariant: (objectId: string, variantId: string) => Promise<void>;
+
   // Inspector metadata edits (M5). All undoable.
   setObjectCategory: (id: string, category: string) => void;
   addObjectTag: (id: string, tag: string) => void;
@@ -257,6 +267,34 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     const project = await api.saveProject(current.path, current.project);
     set((s) => ({ open: s.open ? { ...s.open, project } : null }));
     return project;
+  };
+
+  // Reload the canvas artwork for a shown object after its active variant
+  // changed (M13). A childless object reads its active variant directly; an
+  // object with children re-composes (composeObject reads the active variant
+  // per object). No-op when the object is not the one on the canvas.
+  const reloadActiveArtwork = async (objectId: string) => {
+    if (get().selectedObjectId !== objectId) return;
+    const current = get().open;
+    const obj = current?.project.objects.find((o) => o.id === objectId);
+    if (!current || !obj) return;
+    if (obj.children.length > 0) {
+      await get().refreshComposed();
+      return;
+    }
+    try {
+      const art = await api.readObjectArtwork(current.path, objectId, obj.active_variant);
+      if (get().selectedObjectId !== objectId) return;
+      useCanvasStore.getState().setArtwork({
+        objectId,
+        name: obj.name,
+        width: art.width,
+        height: art.height,
+        url: `data:image/png;base64,${art.data}`,
+      });
+    } catch (e) {
+      set({ error: String(e) });
+    }
   };
 
   // --- Object list mutators. Pure state edits; callers schedule the save and
@@ -541,7 +579,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       // alone.
       if (obj.children.length > 0) return;
       try {
-        const art = await api.readObjectArtwork(current.path, id);
+        const art = await api.readObjectArtwork(current.path, id, obj.active_variant);
         // Guard against a fast re-selection while the read was in flight.
         if (get().selectedObjectId !== id) return;
         useCanvasStore.getState().setArtwork({
@@ -704,6 +742,130 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       }
     },
 
+    addVariant: async (objectId) => {
+      const current = get().open;
+      const obj = current?.project.objects.find((o) => o.id === objectId);
+      if (!current || !obj) return;
+      const source = await api.pickPngFile();
+      if (!source) return;
+      set({ importing: true, error: null });
+      try {
+        // Rust validates the size matches and writes the variant PNG.
+        const variant = await api.importVariant(current.path, obj, source, fileStem(source));
+        const fresh = get().open?.project.objects.find((o) => o.id === objectId);
+        if (!fresh) return;
+        const prevVariants = fresh.variants;
+        const prevActive = fresh.active_variant;
+        const nextVariants = [...prevVariants, variant];
+        const apply = (variants: typeof nextVariants, active: string) => {
+          patchObject(objectId, { variants, active_variant: active });
+          scheduleSave();
+          void reloadActiveArtwork(objectId);
+        };
+        apply(nextVariants, variant.id);
+        useHistory.getState().push({
+          label: 'Add variant',
+          undo: () => apply(prevVariants, prevActive),
+          redo: () => apply(nextVariants, variant.id),
+        });
+      } catch (e) {
+        set({ error: String(e) });
+      } finally {
+        set({ importing: false });
+      }
+    },
+
+    duplicateVariant: async (objectId, variantId) => {
+      const current = get().open;
+      const obj = current?.project.objects.find((o) => o.id === objectId);
+      const source = obj?.variants.find((v) => v.id === variantId);
+      if (!current || !obj || !source) return;
+      try {
+        const variant = await api.duplicateVariant(
+          current.path,
+          obj,
+          variantId,
+          `${source.name} copy`,
+        );
+        const fresh = get().open?.project.objects.find((o) => o.id === objectId);
+        if (!fresh) return;
+        const prevVariants = fresh.variants;
+        const prevActive = fresh.active_variant;
+        const nextVariants = [...prevVariants, variant];
+        const apply = (variants: typeof nextVariants, active: string) => {
+          patchObject(objectId, { variants, active_variant: active });
+          scheduleSave();
+          void reloadActiveArtwork(objectId);
+        };
+        apply(nextVariants, variant.id);
+        useHistory.getState().push({
+          label: 'Duplicate variant',
+          undo: () => apply(prevVariants, prevActive),
+          redo: () => apply(nextVariants, variant.id),
+        });
+      } catch (e) {
+        set({ error: String(e) });
+      }
+    },
+
+    switchVariant: (objectId, variantId) => {
+      const obj = get().open?.project.objects.find((o) => o.id === objectId);
+      if (!obj || obj.active_variant === variantId) return;
+      if (!obj.variants.some((v) => v.id === variantId)) return;
+      const previous = obj.active_variant;
+      const apply = (vid: string) => {
+        patchObject(objectId, { active_variant: vid });
+        scheduleSave();
+        void reloadActiveArtwork(objectId);
+      };
+      apply(variantId);
+      useHistory.getState().push({
+        label: 'Switch variant',
+        undo: () => apply(previous),
+        redo: () => apply(variantId),
+      });
+    },
+
+    renameVariant: (objectId, variantId, name) => {
+      const obj = get().open?.project.objects.find((o) => o.id === objectId);
+      const variant = obj?.variants.find((v) => v.id === variantId);
+      if (!obj || !variant) return;
+      const next = name.trim();
+      if (!next || next === variant.name) return;
+      const nextVariants = obj.variants.map((v) =>
+        v.id === variantId ? { ...v, name: next } : v,
+      );
+      commitPatch('Rename variant', objectId, { variants: obj.variants }, { variants: nextVariants });
+    },
+
+    deleteVariant: async (objectId, variantId) => {
+      const current = get().open;
+      const obj = current?.project.objects.find((o) => o.id === objectId);
+      // Refuse the last variant (mirrors the Rust guard, keeps the delete
+      // button disabled).
+      if (!current || !obj || obj.variants.length <= 1) return;
+      const prevVariants = obj.variants;
+      const prevActive = obj.active_variant;
+      try {
+        // Rust owns the rule (last-variant refusal, active reassignment) and
+        // returns the updated object; the PNG is left on disk (recoverable).
+        const updated = await api.deleteVariant(obj, variantId);
+        const apply = (variants: typeof prevVariants, active: string) => {
+          patchObject(objectId, { variants, active_variant: active });
+          scheduleSave();
+          void reloadActiveArtwork(objectId);
+        };
+        apply(updated.variants, updated.active_variant);
+        useHistory.getState().push({
+          label: 'Delete variant',
+          undo: () => apply(prevVariants, prevActive),
+          redo: () => apply(updated.variants, updated.active_variant),
+        });
+      } catch (e) {
+        set({ error: String(e) });
+      }
+    },
+
     setObjectCategory: (id, category) => {
       const obj = get().open?.project.objects.find((o) => o.id === id);
       if (!obj) return;
@@ -794,7 +956,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         // Losing the last child (remove, undo) drops back to raw artwork.
         if (hadComposed && current && id && obj) {
           try {
-            const art = await api.readObjectArtwork(current.path, id);
+            const art = await api.readObjectArtwork(current.path, id, obj.active_variant);
             if (get().selectedObjectId !== id) return;
             useCanvasStore.getState().setArtwork({
               objectId: id,

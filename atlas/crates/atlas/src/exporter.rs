@@ -1042,4 +1042,86 @@ mod tests {
         assert_eq!(compiled[1].cells[0].metatile_id, SECONDARY_METATILE_BASE + 1);
         assert_eq!(compiled[1].cols, 2);
     }
+
+    /// Write a variant's artwork PNG into `objects/<id>/variants/<vid>.png`.
+    fn write_variant_artwork(
+        project: &Path,
+        id: &str,
+        variant_id: &str,
+        w: u32,
+        h: u32,
+        pixels: &[[u8; 4]],
+    ) {
+        let dir = project
+            .join(OBJECTS_DIR)
+            .join(id)
+            .join(crate::object::VARIANTS_DIR);
+        fs::create_dir_all(&dir).unwrap();
+        let file = fs::File::create(dir.join(format!("{variant_id}.png"))).unwrap();
+        let mut enc = png::Encoder::new(file, w, h);
+        enc.set_color(png::ColorType::Rgba);
+        enc.set_depth(png::BitDepth::Eight);
+        let mut writer = enc.write_header().unwrap();
+        let flat: Vec<u8> = pixels.iter().flatten().copied().collect();
+        writer.write_image_data(&flat).unwrap();
+        writer.finish().unwrap();
+    }
+
+    #[test]
+    fn budgets_and_export_follow_the_active_variant() {
+        use crate::object::Variant;
+        // One 16x16 object with two variants: default (red, at artwork.png) and
+        // winter (blue, at variants/<id>.png). Switching the active variant must
+        // change what budgets, the composition, and the export all see, through
+        // the single shared read path.
+        let loc = temp_dir("active-variant");
+        let open = crate::project::create(loc.to_str().unwrap(), "P").unwrap();
+        let project_dir = PathBuf::from(&open.path);
+        let mut project = open.project;
+
+        let mut obj = Object::for_test("Tree", 16, 16);
+        let default_id = obj.active_variant.clone();
+        let winter = Variant {
+            id: "winter".to_string(),
+            name: "Winter".to_string(),
+        };
+        write_artwork(&project_dir, &obj.id, 16, 16, &vec![[200, 0, 0, 255]; 256]);
+        write_variant_artwork(&project_dir, &obj.id, &winter.id, 16, 16, &vec![[0, 0, 200, 255]; 256]);
+        obj.variants.push(winter.clone());
+
+        let mut tileset = crate::tileset::Tileset::new("Set");
+        tileset.members.push(obj.id.clone());
+        let tileset_id = tileset.id.clone();
+        let obj_id = obj.id.clone();
+        project.objects.push(obj);
+        project.tilesets.push(tileset);
+        crate::project::save(open.path.as_str(), project.clone()).unwrap();
+
+        let export_middle_top_left = |project: &crate::project::Project| -> [u8; 4] {
+            crate::project::save(open.path.as_str(), project.clone()).unwrap();
+            let dest = temp_dir("active-dest");
+            let result =
+                export_tileset(project_dir.to_str().unwrap(), &tileset_id, dest.to_str().unwrap())
+                    .unwrap();
+            let (_, _, middle) =
+                decode(&PathBuf::from(&result.path).join(PORYTILES_SRC_DIR).join("middle.png"));
+            middle[0]
+        };
+
+        // Active = winter: export carries blue.
+        {
+            let obj = project.objects.iter_mut().find(|o| o.id == obj_id).unwrap();
+            obj.active_variant = winter.id.clone();
+        }
+        assert_eq!(export_middle_top_left(&project), [0, 0, 200, 255]);
+        let budget = budgets::compute_for_tileset(project_dir.to_str().unwrap(), &tileset_id).unwrap();
+        assert_eq!(budget.metatiles.used, 1);
+
+        // Switch active back to the default: export carries red.
+        {
+            let obj = project.objects.iter_mut().find(|o| o.id == obj_id).unwrap();
+            obj.active_variant = default_id.clone();
+        }
+        assert_eq!(export_middle_top_left(&project), [200, 0, 0, 255]);
+    }
 }

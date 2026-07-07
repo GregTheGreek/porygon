@@ -23,7 +23,7 @@ use tauri::{AppHandle, Manager};
 use artwork::Artwork;
 use budgets::TilesetBudget;
 use exporter::ExportResult;
-use object::Object;
+use object::{Object, Variant};
 use pokemon_emerald::CollisionTag;
 use porytiles::{BinaryStatus, CompileResult};
 use project::{OpenProject, Project};
@@ -123,10 +123,53 @@ fn restore_object(project_path: String, id: String) -> Result<(), String> {
     object::restore(&project_path, &id).map_err(|e| e.to_string())
 }
 
-/// Read an Object's stored artwork (base64 + dimensions) for the Canvas.
+/// Read an Object variant's stored artwork (base64 + dimensions) for the
+/// Canvas. `variant_id` selects which variant (M13); the frontend passes the
+/// object's active variant.
 #[tauri::command]
-fn read_object_artwork(project_path: String, id: String) -> Result<Artwork, String> {
-    object::read_artwork(&project_path, &id).map_err(|e| e.to_string())
+fn read_object_artwork(
+    project_path: String,
+    id: String,
+    variant_id: String,
+) -> Result<Artwork, String> {
+    object::read_artwork(&project_path, &id, &variant_id).map_err(|e| e.to_string())
+}
+
+/// Import a PNG as a new variant of `object` (M13): copies it into
+/// `objects/<id>/variants/<vid>.png` and returns the new Variant. Refuses (Err)
+/// when the image size does not match the object. The frontend adds the returned
+/// Variant to the object and switches to it as an undoable edit.
+#[tauri::command]
+fn import_variant(
+    project_path: String,
+    object: Object,
+    source_png: String,
+    name: String,
+) -> Result<Variant, String> {
+    object::import_variant(&project_path, &object, &source_png, &name).map_err(|e| e.to_string())
+}
+
+/// Duplicate one of `object`'s variants (M13): copies its artwork to a fresh
+/// `variants/<vid>.png` and returns the new Variant.
+#[tauri::command]
+fn duplicate_variant(
+    project_path: String,
+    object: Object,
+    variant_id: String,
+    name: String,
+) -> Result<Variant, String> {
+    object::duplicate_variant(&project_path, &object, &variant_id, &name).map_err(|e| e.to_string())
+}
+
+/// Remove a variant from `object` (M13), returning the updated Object. Refuses
+/// (Err) the last variant and reassigns the active variant if the removed one
+/// was active. Pure data: the variant's PNG is left on disk (recoverable). The
+/// frontend applies the returned Object and snapshots the previous state for
+/// undo.
+#[tauri::command]
+fn delete_variant(mut object: Object, variant_id: String) -> Result<Object, String> {
+    object.remove_variant(&variant_id)?;
+    Ok(object)
 }
 
 /// The custom collision-tag vocabulary from the pokemon_emerald engine module.
@@ -259,6 +302,9 @@ pub fn run() {
             trash_object,
             restore_object,
             read_object_artwork,
+            import_variant,
+            duplicate_variant,
+            delete_variant,
             collision_tags,
             object_problems,
             compose_object,

@@ -24,6 +24,9 @@ use crate::tileset::Tileset;
 /// defaults, so pre-M5 v2 files load unchanged and no version bump is needed.
 /// M9 adds top-level `tilesets` within v2: same additive story - a missing
 /// field defaults to empty, so pre-M9 projects load unchanged with no bump.
+/// M13 adds per-object `variants`/`active_variant` within v2: additive with
+/// serde defaults, migrated forward by `parse` (see `Object::migrate_variants`),
+/// so pre-M13 projects load unchanged and no version bump is needed.
 pub const FORMAT_VERSION: u32 = 2;
 
 /// Name of the manifest inside a project directory.
@@ -126,6 +129,13 @@ pub fn parse(json: &str) -> Result<Project, ProjectError> {
             found: project.format_version,
             supported: FORMAT_VERSION,
         });
+    }
+    // M13: give every object at least one variant and a resolvable active
+    // variant. Additive with serde defaults (empty `variants`), so pre-M13 v2
+    // files load unchanged and no format_version bump is needed; the next save
+    // writes the migrated shape.
+    for object in &mut project.objects {
+        object.migrate_variants();
     }
     project.format_version = FORMAT_VERSION;
     Ok(project)
@@ -271,6 +281,21 @@ mod tests {
         assert_eq!(back.project.tilesets.len(), 1);
         assert_eq!(back.project.tilesets[0].name, "Forest");
         assert_eq!(back.project.tilesets[0].members, vec!["a", "b"]);
+    }
+
+    #[test]
+    fn parse_pre_m13_object_migrates_to_a_default_variant() {
+        // A v2 manifest written before M13: objects have no `variants` or
+        // `active_variant`. Parse must migrate each to a single default variant
+        // with a resolvable active id, without a version bump.
+        let json = r#"{"format_version":2,"name":"P","created":1,"modified":2,
+            "objects":[{"id":"a","name":"Tree","width":32,"height":48,"anchor":{"x":16,"y":48}}]}"#;
+        let project = parse(json).unwrap();
+        assert_eq!(project.objects.len(), 1);
+        let obj = &project.objects[0];
+        assert_eq!(obj.variants.len(), 1);
+        assert_eq!(obj.active_variant, obj.variants[0].id);
+        assert_eq!(project.format_version, FORMAT_VERSION);
     }
 
     #[test]

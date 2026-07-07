@@ -53,6 +53,10 @@ export function Inspector() {
         />
       </Field>
 
+      <Field label="Variants">
+        <VariantsEditor object={object} />
+      </Field>
+
       <Field label="Anchor (16px grid)">
         <div className="mt-1 flex items-center gap-2">
           <NumberField
@@ -167,6 +171,108 @@ function ChildrenEditor({ object }: { object: AtlasObject }) {
         ))}
       </select>
     </div>
+  );
+}
+
+// The Variants section (M13): the object's named artwork variations. Only the
+// artwork differs between variants - metadata, collision, occlusion, and
+// dimensions are shared. Click a variant to make it active (canvas, budgets,
+// export, and play all follow the active one); rename inline; duplicate; add a
+// new one by importing a same-size PNG; delete (never the last). All undoable.
+function VariantsEditor({ object }: { object: AtlasObject }) {
+  const addVariant = useProjectStore((s) => s.addVariant);
+  const duplicateVariant = useProjectStore((s) => s.duplicateVariant);
+  const switchVariant = useProjectStore((s) => s.switchVariant);
+  const renameVariant = useProjectStore((s) => s.renameVariant);
+  const deleteVariant = useProjectStore((s) => s.deleteVariant);
+  const importing = useProjectStore((s) => s.importing);
+
+  const canDelete = object.variants.length > 1;
+
+  return (
+    <div className="mt-1 space-y-1.5">
+      {object.variants.map((variant) => {
+        const active = variant.id === object.active_variant;
+        return (
+          <div
+            key={variant.id}
+            className={`flex items-center gap-1 rounded border px-2 py-1 ${
+              active ? 'border-accent bg-accent/10' : 'border-bg-border bg-bg-input/40'
+            }`}
+          >
+            <button
+              type="button"
+              title={active ? 'Active variant' : 'Switch to this variant'}
+              onClick={() => switchVariant(object.id, variant.id)}
+              className="shrink-0 text-xs"
+            >
+              <span className={active ? 'text-accent' : 'text-fg-subtle'}>
+                {active ? '●' : '○'}
+              </span>
+            </button>
+            <InlineName
+              value={variant.name}
+              onCommit={(v) => renameVariant(object.id, variant.id, v)}
+            />
+            <button
+              type="button"
+              title="Duplicate this variant"
+              onClick={() => void duplicateVariant(object.id, variant.id)}
+              className="shrink-0 rounded px-1 py-0.5 text-xs text-fg-subtle hover:bg-bg-raised hover:text-fg"
+            >
+              Dup
+            </button>
+            <button
+              type="button"
+              title={canDelete ? 'Delete this variant' : 'An object must keep at least one variant'}
+              disabled={!canDelete}
+              onClick={() => void deleteVariant(object.id, variant.id)}
+              className="shrink-0 rounded px-1 py-0.5 text-xs text-fg-subtle hover:bg-red-500/20 hover:text-red-300 disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-fg-subtle"
+            >
+              Del
+            </button>
+          </div>
+        );
+      })}
+
+      <button
+        type="button"
+        onClick={() => void addVariant(object.id)}
+        disabled={importing}
+        title="Import a same-size PNG as a new variant"
+        className="w-full rounded border border-bg-border bg-bg-input px-2 py-1 text-xs text-fg-muted hover:border-accent hover:text-fg disabled:opacity-40"
+      >
+        {importing ? 'Importing…' : 'Add variant…'}
+      </button>
+    </div>
+  );
+}
+
+// Inline-editable variant name: click to edit, commits on blur/Enter.
+function InlineName({
+  value,
+  onCommit,
+}: {
+  value: string;
+  onCommit: (value: string) => void;
+}) {
+  const [draft, setDraft] = useState(value);
+  useEffect(() => setDraft(value), [value]);
+
+  return (
+    <input
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => {
+        onCommit(draft);
+        setDraft(value);
+      }}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') e.currentTarget.blur();
+        if (e.key === 'Escape') setDraft(value);
+      }}
+      className="min-w-0 flex-1 rounded border border-transparent bg-transparent px-1 text-sm text-fg outline-none focus:border-accent focus:bg-bg-input"
+    />
   );
 }
 

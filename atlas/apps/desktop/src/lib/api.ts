@@ -34,6 +34,14 @@ export type ChildPlacement = {
   y: number;
 };
 
+// One named artwork variant of an Object (M13). Mirrors Variant in
+// crates/atlas/src/object.rs. Only the artwork changes between variants; all
+// metadata, collision, occlusion, children, and dimensions are shared.
+export type Variant = {
+  id: string;
+  name: string;
+};
+
 // A reusable authoring Object. Metadata only; artwork pixels live on disk under
 // the project's `objects/<id>/` directory and are fetched via readObjectArtwork.
 export type AtlasObject = {
@@ -47,6 +55,10 @@ export type AtlasObject = {
   collision: Collision;
   occlusion: Occlusion;
   children: ChildPlacement[];
+  // Named artwork variants (M13). Never empty; `active_variant` is the id of the
+  // one shown on the canvas and consumed by budgets, export, and play.
+  variants: Variant[];
+  active_variant: string;
 };
 
 // A direct child's flattened footprint in composed space, for the canvas
@@ -269,12 +281,46 @@ export async function restoreObject(projectPath: string, id: string): Promise<vo
   return invoke<void>('restore_object', { projectPath, id });
 }
 
-/// Read an Object's stored artwork (base64 + dimensions) for the Canvas.
+/// Read an Object variant's stored artwork (base64 + dimensions) for the
+/// Canvas. `variantId` selects the variant (M13); pass the object's active one.
 export async function readObjectArtwork(
   projectPath: string,
   id: string,
+  variantId: string,
 ): Promise<Artwork> {
-  return invoke<Artwork>('read_object_artwork', { projectPath, id });
+  return invoke<Artwork>('read_object_artwork', { projectPath, id, variantId });
+}
+
+/// Import a PNG as a new variant of `object` (M13). Copies the artwork into the
+/// project and returns the new Variant. Rejects (throws) a size mismatch.
+export async function importVariant(
+  projectPath: string,
+  object: AtlasObject,
+  sourcePng: string,
+  name: string,
+): Promise<Variant> {
+  return invoke<Variant>('import_variant', { projectPath, object, sourcePng, name });
+}
+
+/// Duplicate one of `object`'s variants (M13); copies its artwork to a fresh
+/// file and returns the new Variant.
+export async function duplicateVariant(
+  projectPath: string,
+  object: AtlasObject,
+  variantId: string,
+  name: string,
+): Promise<Variant> {
+  return invoke<Variant>('duplicate_variant', { projectPath, object, variantId, name });
+}
+
+/// Remove a variant from `object` (M13), returning the updated Object. Throws
+/// on the last variant; reassigns the active variant when the active one is
+/// removed. The variant's PNG is left on disk (recoverable).
+export async function deleteVariant(
+  object: AtlasObject,
+  variantId: string,
+): Promise<AtlasObject> {
+  return invoke<AtlasObject>('delete_variant', { object, variantId });
 }
 
 /// The custom collision-tag vocabulary from the pokemon_emerald engine module.

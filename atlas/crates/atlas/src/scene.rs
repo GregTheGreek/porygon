@@ -341,7 +341,7 @@ pub fn load_sources<'a>(
     let mut sources = BTreeMap::new();
     while let Some(id) = queue.pop() {
         let Some(obj) = by_id.get(id) else { continue };
-        let art = crate::object::decode_artwork(project_dir, &obj.id)
+        let art = crate::object::decode_artwork(project_dir, &obj.id, &obj.active_variant)
             .map_err(|e| format!("Could not read artwork for \"{}\": {e}", obj.name))?;
         sources.insert(
             obj.id.clone(),
