@@ -21,8 +21,12 @@ export function BudgetMeter({ label, used, total, note }: Props) {
       : 'bg-accent';
   const numColor = over ? 'text-red-400' : 'text-fg';
 
+  const exact = `${used} of ${total} used${note ? ` (${note})` : ''}${
+    over ? ' - over budget' : ''
+  }`;
+
   return (
-    <div>
+    <div title={exact}>
       <div className="flex items-baseline justify-between">
         <span className="text-xs uppercase tracking-wide text-fg-muted">
           {label}

@@ -253,6 +253,17 @@ fn set_porytiles_path(app: AppHandle, path: Option<String>) -> Result<Settings, 
     Ok(current)
 }
 
+/// Replace the whole settings object (the M14 Preferences dialog). Normalizes
+/// before persisting (blank path clears to default, debounce clamped to range)
+/// and returns the saved settings so the UI reflects any clamping.
+#[tauri::command]
+fn set_settings(app: AppHandle, settings: Settings) -> Result<Settings, String> {
+    let file = settings_file(&app)?;
+    let normalized = settings.normalized();
+    settings::save(&file, &normalized)?;
+    Ok(normalized)
+}
+
 /// Check the configured Porytiles binary: is it present and exactly the pinned
 /// version? Drives the compile-readiness UI. Never fails; a missing or wrong
 /// binary comes back as `ok: false` with an artist-facing message.
@@ -313,6 +324,7 @@ pub fn run() {
             export_tileset,
             get_settings,
             set_porytiles_path,
+            set_settings,
             verify_porytiles,
             compile_tileset,
             get_recent_projects

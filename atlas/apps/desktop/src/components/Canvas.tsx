@@ -77,9 +77,14 @@ export function Canvas() {
   const occlusionBrushSize = useCanvasStore((s) => s.occlusionBrushSize);
   const previewEnabled = useCanvasStore((s) => s.previewEnabled);
 
+  // Grid visibility lives in the canvas store (M14) so shortcuts, the command
+  // palette, and the default-grid preference can drive it too.
+  const show8 = useCanvasStore((s) => s.grid8);
+  const show16 = useCanvasStore((s) => s.grid16);
+  const toggleGrid8 = useCanvasStore((s) => s.toggleGrid8);
+  const toggleGrid16 = useCanvasStore((s) => s.toggleGrid16);
+
   const [zoom, setZoom] = useState(100);
-  const [show8, setShow8] = useState(false);
-  const [show16, setShow16] = useState(false);
   const [engineError, setEngineError] = useState<string | null>(null);
 
   // Create the Pixi engine once. Init is async, so guard against unmount.
@@ -279,19 +284,19 @@ export function Canvas() {
           )}
         </div>
         <div className="flex items-center gap-1 text-xs">
-          <GridToggle label="8" title="Toggle 8px tile grid" active={show8} onClick={() => setShow8((v) => !v)} />
-          <GridToggle label="16" title="Toggle 16px metatile grid" active={show16} onClick={() => setShow16((v) => !v)} />
+          <GridToggle label="8" title="Toggle 8px tile grid (Shift+G)" active={show8} onClick={toggleGrid8} />
+          <GridToggle label="16" title="Toggle 16px metatile grid (G)" active={show16} onClick={toggleGrid16} />
           <span className="mx-1 h-4 w-px bg-bg-border" />
-          <CanvasButton disabled={!hasArtwork} onClick={() => engineRef.current?.zoomStep(1 / 1.5)}>
+          <CanvasButton title="Zoom out (Cmd/Ctrl+-)" disabled={!hasArtwork} onClick={() => engineRef.current?.zoomStep(1 / 1.5)}>
             −
           </CanvasButton>
-          <CanvasButton disabled={!hasArtwork} onClick={() => engineRef.current?.zoomStep(1.5)}>
+          <CanvasButton title="Zoom in (Cmd/Ctrl+=)" disabled={!hasArtwork} onClick={() => engineRef.current?.zoomStep(1.5)}>
             +
           </CanvasButton>
-          <CanvasButton disabled={!hasArtwork} onClick={() => engineRef.current?.fit()}>
+          <CanvasButton title="Fit to view (Cmd/Ctrl+0)" disabled={!hasArtwork} onClick={() => engineRef.current?.fit()}>
             Fit
           </CanvasButton>
-          <CanvasButton disabled={!hasArtwork} onClick={() => engineRef.current?.reset100()}>
+          <CanvasButton title="Actual size 100% (Cmd/Ctrl+1)" disabled={!hasArtwork} onClick={() => engineRef.current?.reset100()}>
             100%
           </CanvasButton>
           <span className="w-12 text-right font-mono text-fg-subtle">
@@ -339,14 +344,17 @@ function CanvasButton({
   children,
   onClick,
   disabled,
+  title,
 }: {
   children: React.ReactNode;
   onClick: () => void;
   disabled?: boolean;
+  title?: string;
 }) {
   return (
     <button
       type="button"
+      title={title}
       onClick={onClick}
       disabled={disabled}
       className="rounded px-1.5 py-0.5 text-fg-muted hover:bg-bg-input hover:text-fg disabled:opacity-30 disabled:hover:bg-transparent"

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useProjectStore, type SaveStatus } from '../store/project';
+import { useUiStore } from '../store/ui';
 
 type Props = {
   version: string;
@@ -19,6 +20,9 @@ export function Toolbar({ version }: Props) {
   const close = useProjectStore((s) => s.close);
   const importObject = useProjectStore((s) => s.importObject);
   const importing = useProjectStore((s) => s.importing);
+  const openPalette = useUiStore((s) => s.openPalette);
+  const openHelp = useUiStore((s) => s.openHelp);
+  const openPreferences = useUiStore((s) => s.openPreferences);
 
   return (
     <div className="flex h-9 shrink-0 items-center justify-between border-b border-bg-border bg-bg-raised px-3 select-none">
@@ -62,11 +66,47 @@ export function Toolbar({ version }: Props) {
             Close
           </button>
         )}
+        <span className="mx-1 h-4 w-px bg-bg-border" />
+        <button
+          type="button"
+          onClick={openPalette}
+          title="Command palette (Cmd/Ctrl+K)"
+          className="rounded px-1.5 py-0.5 font-mono text-xs text-fg-subtle hover:bg-bg-input hover:text-fg"
+        >
+          ⌘K
+        </button>
+        <button
+          type="button"
+          onClick={openHelp}
+          title="Keyboard shortcuts (Cmd/Ctrl+/ or ?)"
+          className="rounded px-1.5 py-0.5 text-xs text-fg-subtle hover:bg-bg-input hover:text-fg"
+        >
+          ?
+        </button>
+        <button
+          type="button"
+          onClick={openPreferences}
+          title="Preferences"
+          className="rounded p-1 text-fg-subtle hover:bg-bg-input hover:text-fg"
+        >
+          <GearIcon />
+        </button>
         <span className="font-mono text-xs text-fg-subtle">
           {version ? `v${version}` : ''}
         </span>
       </div>
     </div>
+  );
+}
+
+// A small inline cog (not an emoji, per the style rules) for the Preferences
+// button. 14px, stroked with currentColor so it inherits the button's text tone.
+function GearIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+    </svg>
   );
 }
 

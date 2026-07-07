@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useProjectStore, wouldCreateCycle } from '../store/project';
+import { useUiStore, type MenuItem } from '../store/ui';
 import type { AtlasObject } from '../lib/api';
 
 // Right panel: live, dialog-free metadata editing for the selected Object.
@@ -94,10 +95,30 @@ function ChildrenEditor({ object }: { object: AtlasObject }) {
   const selectedChildIndex = useProjectStore((s) => s.selectedChildIndex);
   const selectChild = useProjectStore((s) => s.selectChild);
 
+  const openContextMenu = useUiStore((s) => s.openContextMenu);
+
   const byId = new Map(objects.map((o) => [o.id, o]));
   const candidates = objects.filter(
     (o) => o.id !== object.id && !wouldCreateCycle(objects, object.id, o.id),
   );
+
+  const onChildContextMenu = (e: React.MouseEvent, index: number) => {
+    e.preventDefault();
+    const highlighted = selectedChildIndex === index;
+    const items: MenuItem[] = [
+      {
+        label: highlighted ? 'Clear highlight' : 'Highlight footprint',
+        onClick: () => selectChild(highlighted ? null : index),
+      },
+      { separator: true },
+      {
+        label: 'Remove child',
+        danger: true,
+        onClick: () => removeObjectChild(object.id, index),
+      },
+    ];
+    openContextMenu(e.clientX, e.clientY, items);
+  };
 
   return (
     <div className="mt-1 space-y-1.5">
@@ -107,6 +128,7 @@ function ChildrenEditor({ object }: { object: AtlasObject }) {
         return (
           <div
             key={i}
+            onContextMenu={(e) => onChildContextMenu(e, i)}
             className={`rounded border px-2 py-1.5 ${
               selected ? 'border-accent bg-accent/10' : 'border-bg-border bg-bg-input/40'
             }`}
@@ -186,16 +208,49 @@ function VariantsEditor({ object }: { object: AtlasObject }) {
   const renameVariant = useProjectStore((s) => s.renameVariant);
   const deleteVariant = useProjectStore((s) => s.deleteVariant);
   const importing = useProjectStore((s) => s.importing);
+  const renaming = useProjectStore((s) => s.renaming);
+  const beginRename = useProjectStore((s) => s.beginRename);
+  const endRename = useProjectStore((s) => s.endRename);
+  const openContextMenu = useUiStore((s) => s.openContextMenu);
 
   const canDelete = object.variants.length > 1;
+
+  const onVariantContextMenu = (e: React.MouseEvent, variantId: string, active: boolean) => {
+    e.preventDefault();
+    const items: MenuItem[] = [
+      {
+        label: 'Switch to variant',
+        disabled: active,
+        onClick: () => switchVariant(object.id, variantId),
+      },
+      {
+        label: 'Rename',
+        onClick: () => beginRename({ kind: 'variant', objectId: object.id, variantId }),
+      },
+      { label: 'Duplicate', onClick: () => void duplicateVariant(object.id, variantId) },
+      { separator: true },
+      {
+        label: 'Delete',
+        danger: true,
+        disabled: !canDelete,
+        onClick: () => void deleteVariant(object.id, variantId),
+      },
+    ];
+    openContextMenu(e.clientX, e.clientY, items);
+  };
 
   return (
     <div className="mt-1 space-y-1.5">
       {object.variants.map((variant) => {
         const active = variant.id === object.active_variant;
+        const renameActive =
+          renaming?.kind === 'variant' &&
+          renaming.objectId === object.id &&
+          renaming.variantId === variant.id;
         return (
           <div
             key={variant.id}
+            onContextMenu={(e) => onVariantContextMenu(e, variant.id, active)}
             className={`flex items-center gap-1 rounded border px-2 py-1 ${
               active ? 'border-accent bg-accent/10' : 'border-bg-border bg-bg-input/40'
             }`}
@@ -212,6 +267,8 @@ function VariantsEditor({ object }: { object: AtlasObject }) {
             </button>
             <InlineName
               value={variant.name}
+              renameActive={renameActive}
+              onRenameHandled={endRename}
               onCommit={(v) => renameVariant(object.id, variant.id, v)}
             />
             <button
@@ -248,28 +305,47 @@ function VariantsEditor({ object }: { object: AtlasObject }) {
   );
 }
 
-// Inline-editable variant name: click to edit, commits on blur/Enter.
+// Inline-editable variant name: click to edit, commits on blur/Enter. When a
+// context-menu "Rename" targets it (renameActive), it focuses and selects, then
+// clears the rename target on commit/blur so it does not re-focus.
 function InlineName({
   value,
   onCommit,
+  renameActive = false,
+  onRenameHandled,
 }: {
   value: string;
   onCommit: (value: string) => void;
+  renameActive?: boolean;
+  onRenameHandled?: () => void;
 }) {
   const [draft, setDraft] = useState(value);
+  const inputRef = useRef<HTMLInputElement>(null);
   useEffect(() => setDraft(value), [value]);
+  useEffect(() => {
+    if (renameActive) {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    }
+  }, [renameActive]);
 
   return (
     <input
+      ref={inputRef}
       value={draft}
       onChange={(e) => setDraft(e.target.value)}
       onBlur={() => {
         onCommit(draft);
         setDraft(value);
+        if (renameActive) onRenameHandled?.();
       }}
       onKeyDown={(e) => {
         if (e.key === 'Enter') e.currentTarget.blur();
-        if (e.key === 'Escape') setDraft(value);
+        if (e.key === 'Escape') {
+          setDraft(value);
+          if (renameActive) onRenameHandled?.();
+          e.currentTarget.blur();
+        }
       }}
       className="min-w-0 flex-1 rounded border border-transparent bg-transparent px-1 text-sm text-fg outline-none focus:border-accent focus:bg-bg-input"
     />

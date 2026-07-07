@@ -16,10 +16,24 @@ import type {
 } from '../lib/api';
 import { useCanvasStore } from './canvas';
 import { useHistory } from './history';
+import { usePreferences } from './preferences';
 
 // Reflects whether the on-disk copy is up to date with the in-memory one.
 export type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
+// Which inline name field is currently being edited (M14). Set by a keyboard
+// shortcut (F2/Enter) or a context menu; the owning row/field watches this and
+// enters edit mode. View state, never persisted.
+export type RenameTarget =
+  | { kind: 'object'; id: string }
+  | { kind: 'tileset'; id: string }
+  | { kind: 'variant'; objectId: string; variantId: string };
+
+// Modifiers on an Object Library click, deciding how the multi-selection set
+// changes (M14). `meta` is cmd/ctrl (toggle), `shift` is a range extend.
+export type ClickModifiers = { meta: boolean; shift: boolean };
+
+// Fallback autosave debounce if preferences have not loaded yet.
 const AUTOSAVE_DELAY_MS = 1000;
 
 // Derive a default object name from a PNG path (basename without extension).
@@ -111,9 +125,18 @@ type ProjectState = {
   status: SaveStatus;
   error: string | null;
 
-  // Which object's artwork is shown on the Canvas. Selection is view state and
-  // is deliberately not undoable.
+  // Which object's artwork is shown on the Canvas. This is the PRIMARY
+  // selection: the Canvas and Inspector always follow it. Selection is view
+  // state and is deliberately not undoable.
   selectedObjectId: string | null;
+  // The full multi-selection set (M14), including the primary. Bulk operations
+  // (delete, add-to-tileset) act on this whole set; the single-selection
+  // Canvas/Inspector flow reads `selectedObjectId` (the last-clicked member).
+  // Always kept consistent: `selectedObjectId` is null iff this is empty, and
+  // whenever it is non-null it appears in this array.
+  selectedObjectIds: string[];
+  // The inline name field currently open for editing, or null (M14).
+  renaming: RenameTarget | null;
   importing: boolean;
 
   // The composed view of the selected object when it has children (M12):
@@ -146,12 +169,29 @@ type ProjectState = {
   openProject: (dir: string) => Promise<void>;
   close: () => void;
   rename: (name: string) => void;
+  // Flush any pending debounced save immediately (cmd+S / palette). Resolves
+  // once the on-disk copy is up to date.
+  saveNow: () => Promise<void>;
 
   selectObject: (id: string | null) => Promise<void>;
+  // A click in the Object Library, applying the multi-select rules (M14). Plain
+  // click replaces the selection; cmd/ctrl toggles; shift extends a range.
+  clickObject: (id: string, mods: ClickModifiers) => Promise<void>;
+  // Move the primary selection up/down the library list (keyboard nav, M14).
+  selectAdjacentObject: (delta: number) => void;
+  beginRename: (target: RenameTarget) => void;
+  endRename: () => void;
   importObject: () => Promise<void>;
+  // Import a PNG at a known path (Finder file-drop, M14). Rejects non-PNG paths
+  // with a clear message and requires an open project.
+  importObjectFromPath: (path: string) => Promise<void>;
   renameObject: (id: string, name: string) => void;
   duplicateObject: (id: string) => Promise<void>;
   deleteObject: (id: string) => Promise<void>;
+  // Delete every object in the set as a sequence of undoable deletes (M14).
+  bulkDeleteObjects: (ids: string[]) => Promise<void>;
+  // Add every object in the set to a tileset (M14 bulk add-to-tileset).
+  bulkAddToTileset: (tilesetId: string, ids: string[]) => void;
 
   // Variant edits (M13). All undoable, all through autosave. Only artwork
   // differs between variants; switching one changes the active artwork on the
@@ -199,6 +239,9 @@ type ProjectState = {
   deleteTileset: (id: string) => void;
   addTilesetMember: (tilesetId: string, objectId: string) => void;
   removeTilesetMember: (tilesetId: string, objectId: string) => void;
+  // Reorder members within a tileset (M14 drag-to-reorder). Order matters for
+  // layout, so this is an undoable project edit like the other membership ops.
+  reorderTilesetMember: (tilesetId: string, from: number, to: number) => void;
 
   // Persist the project, then compute the Tier 2 budget for a tileset and store
   // it. Saving first is required: the Rust budget command reads member artwork
@@ -249,9 +292,12 @@ export const useProjectStore = create<ProjectState>((set, get) => {
 
   const scheduleSave = () => {
     if (saveTimer) clearTimeout(saveTimer);
+    // Debounce is a preference (M14); fall back to the shipped default until
+    // preferences load.
+    const delay = usePreferences.getState().settings.autosave_debounce_ms || AUTOSAVE_DELAY_MS;
     saveTimer = setTimeout(() => {
       void flushSave();
-    }, AUTOSAVE_DELAY_MS);
+    }, delay);
   };
 
   // Persist immediately, superseding any pending debounced save, and return the
@@ -297,6 +343,80 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     }
   };
 
+  // Load an object's artwork onto the Canvas and make it the primary selection,
+  // without touching the multi-selection set (its callers own that). Opening an
+  // object closes any open Tileset Builder (the centre is one view).
+  const showObject = async (id: string | null) => {
+    set({
+      selectedObjectId: id,
+      selectedTilesetId: id === null ? get().selectedTilesetId : null,
+      composed: null,
+      composeError: null,
+      selectedChildIndex: null,
+    });
+    const canvas = useCanvasStore.getState();
+    if (id === null) {
+      canvas.setArtwork(null);
+      return;
+    }
+    const current = get().open;
+    const obj = current?.project.objects.find((o) => o.id === id);
+    if (!current || !obj) {
+      canvas.setArtwork(null);
+      return;
+    }
+    // An object with children shows COMPOSED: refreshComposed (driven by the
+    // Canvas whenever objects or the selection change) supplies the artwork, so
+    // the raw read is skipped to avoid a flash of the parent alone.
+    if (obj.children.length > 0) return;
+    try {
+      const art = await api.readObjectArtwork(current.path, id, obj.active_variant);
+      // Guard against a fast re-selection while the read was in flight.
+      if (get().selectedObjectId !== id) return;
+      useCanvasStore.getState().setArtwork({
+        objectId: id,
+        name: obj.name,
+        width: art.width,
+        height: art.height,
+        url: `data:image/png;base64,${art.data}`,
+      });
+    } catch (e) {
+      set({ error: String(e) });
+    }
+  };
+
+  // Shared import path for the Import button and Finder file-drop. Copies the
+  // PNG into the project as a new Object, selects it, and pushes the undo.
+  const importObjectFrom = async (source: string) => {
+    const current = get().open;
+    if (!current) return;
+    set({ importing: true, error: null });
+    try {
+      const obj = await api.importObject(current.path, source, fileStem(source));
+      addObject(obj);
+      scheduleSave();
+      await get().selectObject(obj.id);
+      useHistory.getState().push({
+        label: 'Import object',
+        undo: async () => {
+          await api.trashObject(current.path, obj.id);
+          removeObject(obj.id);
+          scheduleSave();
+        },
+        redo: async () => {
+          await api.restoreObject(current.path, obj.id);
+          addObject(obj);
+          scheduleSave();
+          await get().selectObject(obj.id);
+        },
+      });
+    } catch (e) {
+      set({ error: String(e) });
+    } finally {
+      set({ importing: false });
+    }
+  };
+
   // --- Object list mutators. Pure state edits; callers schedule the save and
   // push the undo command. Object metadata lives inside open.project.objects,
   // so editing it and saving the project persists everything in one write.
@@ -338,6 +458,12 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           }
         : s,
     );
+    // Drop the id from the multi-selection set and close any rename of it.
+    set((s) => ({
+      selectedObjectIds: s.selectedObjectIds.filter((x) => x !== id),
+      renaming:
+        s.renaming?.kind === 'object' && s.renaming.id === id ? null : s.renaming,
+    }));
     // Deleting the shown object clears the Canvas and selection.
     if (get().selectedObjectId === id) {
       set({ selectedObjectId: null });
@@ -473,6 +599,8 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     clearTilesetDerived();
     set({
       selectedObjectId: null,
+      selectedObjectIds: [],
+      renaming: null,
       selectedTilesetId: null,
       importing: false,
       composed: null,
@@ -487,6 +615,8 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     status: 'idle',
     error: null,
     selectedObjectId: null,
+    selectedObjectIds: [],
+    renaming: null,
     importing: false,
     composed: null,
     composeError: null,
@@ -553,77 +683,93 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       scheduleSave();
     },
 
-    selectObject: async (id) => {
-      // Opening an object closes any open Tileset Builder (center is one view).
-      set({
-        selectedObjectId: id,
-        selectedTilesetId: id === null ? get().selectedTilesetId : null,
-        composed: null,
-        composeError: null,
-        selectedChildIndex: null,
-      });
-      const canvas = useCanvasStore.getState();
-      if (id === null) {
-        canvas.setArtwork(null);
-        return;
+    saveNow: async () => {
+      if (saveTimer) {
+        clearTimeout(saveTimer);
+        saveTimer = null;
       }
-      const current = get().open;
-      const obj = current?.project.objects.find((o) => o.id === id);
-      if (!current || !obj) {
-        canvas.setArtwork(null);
-        return;
-      }
-      // An object with children shows COMPOSED: refreshComposed (driven by
-      // the Canvas whenever objects or the selection change) supplies the
-      // artwork, so the raw read is skipped to avoid a flash of the parent
-      // alone.
-      if (obj.children.length > 0) return;
-      try {
-        const art = await api.readObjectArtwork(current.path, id, obj.active_variant);
-        // Guard against a fast re-selection while the read was in flight.
-        if (get().selectedObjectId !== id) return;
-        useCanvasStore.getState().setArtwork({
-          objectId: id,
-          name: obj.name,
-          width: art.width,
-          height: art.height,
-          url: `data:image/png;base64,${art.data}`,
-        });
-      } catch (e) {
-        set({ error: String(e) });
-      }
+      await flushSave();
     },
 
+    selectObject: async (id) => {
+      // A programmatic single-select collapses the multi-selection to just this
+      // object (or clears it). The multi-select path is clickObject.
+      set({ selectedObjectIds: id === null ? [] : [id] });
+      await showObject(id);
+    },
+
+    clickObject: async (id, mods) => {
+      const objects = get().open?.project.objects ?? [];
+      if (!objects.some((o) => o.id === id)) return;
+      const currentIds = get().selectedObjectIds;
+      const primary = get().selectedObjectId;
+
+      let nextIds: string[];
+      let nextPrimary: string | null;
+
+      if (mods.meta) {
+        // Toggle: add if absent (becomes primary), remove if present (primary
+        // falls back to the last remaining member, or null).
+        if (currentIds.includes(id)) {
+          nextIds = currentIds.filter((x) => x !== id);
+          nextPrimary = nextIds.at(-1) ?? null;
+        } else {
+          nextIds = [...currentIds, id];
+          nextPrimary = id;
+        }
+      } else if (mods.shift) {
+        // Range from the primary (anchor) to the clicked id, in list order.
+        const order = objects.map((o) => o.id);
+        const anchor = primary ?? id;
+        const a = order.indexOf(anchor);
+        const b = order.indexOf(id);
+        const [lo, hi] = a <= b ? [a, b] : [b, a];
+        nextIds = order.slice(lo, hi + 1);
+        nextPrimary = id;
+      } else {
+        nextIds = [id];
+        nextPrimary = id;
+      }
+
+      set({ selectedObjectIds: nextIds });
+      await showObject(nextPrimary);
+    },
+
+    selectAdjacentObject: (delta) => {
+      const objects = get().open?.project.objects ?? [];
+      if (objects.length === 0) return;
+      const cur = get().selectedObjectId;
+      const idx = objects.findIndex((o) => o.id === cur);
+      const nextIdx =
+        idx === -1
+          ? delta > 0
+            ? 0
+            : objects.length - 1
+          : clamp(idx + delta, 0, objects.length - 1);
+      const target = objects[nextIdx];
+      if (target) void get().selectObject(target.id);
+    },
+
+    beginRename: (target) => set({ renaming: target }),
+    endRename: () => set({ renaming: null }),
+
     importObject: async () => {
-      const current = get().open;
-      if (!current) return;
+      if (!get().open) return;
       const source = await api.pickPngFile();
       if (!source) return;
-      set({ importing: true, error: null });
-      try {
-        const obj = await api.importObject(current.path, source, fileStem(source));
-        addObject(obj);
-        scheduleSave();
-        await get().selectObject(obj.id);
-        useHistory.getState().push({
-          label: 'Import object',
-          undo: async () => {
-            await api.trashObject(current.path, obj.id);
-            removeObject(obj.id);
-            scheduleSave();
-          },
-          redo: async () => {
-            await api.restoreObject(current.path, obj.id);
-            addObject(obj);
-            scheduleSave();
-            await get().selectObject(obj.id);
-          },
-        });
-      } catch (e) {
-        set({ error: String(e) });
-      } finally {
-        set({ importing: false });
+      await importObjectFrom(source);
+    },
+
+    importObjectFromPath: async (path) => {
+      if (!get().open) {
+        set({ error: 'Open or create a project before importing artwork.' });
+        return;
       }
+      if (!/\.png$/i.test(path)) {
+        set({ error: 'Only PNG files can be imported as objects.' });
+        return;
+      }
+      await importObjectFrom(path);
     },
 
     renameObject: (id, name) => {
@@ -740,6 +886,19 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       } catch (e) {
         set({ error: String(e) });
       }
+    },
+
+    bulkDeleteObjects: async (ids) => {
+      // Sequential single deletes: each is its own undoable command (the
+      // history model is per-command), so the artist undoes them one at a time.
+      // Snapshot the ids first, since deleteObject prunes the selection set.
+      for (const id of [...ids]) {
+        await get().deleteObject(id);
+      }
+    },
+
+    bulkAddToTileset: (tilesetId, ids) => {
+      for (const id of ids) get().addTilesetMember(tilesetId, id);
     },
 
     addVariant: async (objectId) => {
@@ -1167,6 +1326,33 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       scheduleSave();
       useHistory.getState().push({
         label: 'Remove from tileset',
+        undo: () => {
+          patchTileset(tilesetId, { members: previous });
+          scheduleSave();
+        },
+        redo: () => {
+          patchTileset(tilesetId, { members: next });
+          scheduleSave();
+        },
+      });
+    },
+
+    reorderTilesetMember: (tilesetId, from, to) => {
+      const tileset = get().open?.project.tilesets.find((t) => t.id === tilesetId);
+      if (!tileset) return;
+      const count = tileset.members.length;
+      if (from < 0 || to < 0 || from >= count || to >= count || from === to) return;
+      const previous = tileset.members;
+      const moved = previous[from];
+      if (moved === undefined) return;
+      const next = [...previous];
+      next.splice(from, 1);
+      next.splice(to, 0, moved);
+      patchTileset(tilesetId, { members: next });
+      set({ compileResult: null, compileError: null });
+      scheduleSave();
+      useHistory.getState().push({
+        label: 'Reorder tileset',
         undo: () => {
           patchTileset(tilesetId, { members: previous });
           scheduleSave();

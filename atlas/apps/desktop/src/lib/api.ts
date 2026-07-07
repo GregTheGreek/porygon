@@ -132,8 +132,14 @@ export type TilesetBudget = {
 // Mirrors ExportResult in crates/atlas/src/exporter.rs.
 export type ExportResult = { path: string };
 
-// App-level settings. Mirrors settings.rs. `porytiles_path` null = use default.
-export type Settings = { porytiles_path: string | null };
+// App-level settings. Mirrors settings.rs. `porytiles_path` null = use default;
+// `autosave_debounce_ms` paces autosave; `default_grid` is the 16px metatile
+// grid's default visibility on the canvas.
+export type Settings = {
+  porytiles_path: string | null;
+  autosave_debounce_ms: number;
+  default_grid: boolean;
+};
 
 // Result of checking the Porytiles binary. Mirrors porytiles.rs BinaryStatus.
 export type BinaryStatus = {
@@ -384,6 +390,12 @@ export async function getSettings(): Promise<Settings> {
 /// Override the Porytiles binary path (pass null to clear back to default).
 export async function setPorytilesPath(path: string | null): Promise<Settings> {
   return invoke<Settings>('set_porytiles_path', { path });
+}
+
+/// Replace the whole settings object (the Preferences dialog). Rust normalizes
+/// (blank path -> default, debounce clamped) and returns the saved settings.
+export async function saveSettings(settings: Settings): Promise<Settings> {
+  return invoke<Settings>('set_settings', { settings });
 }
 
 /// Check the configured Porytiles binary: present and exactly the pinned

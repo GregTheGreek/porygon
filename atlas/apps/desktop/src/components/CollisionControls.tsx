@@ -43,12 +43,17 @@ export function CollisionControls() {
   return (
     <>
       <span className="mx-1 h-4 w-px bg-bg-border" />
-      <ToolbarButton active={activeTool === 'blocked'} onClick={() => setPaintValue('Blocked')}>
+      <ToolbarButton
+        active={activeTool === 'blocked'}
+        title="Paint impassable (blocked) cells"
+        onClick={() => setPaintValue('Blocked')}
+      >
         Blocked
       </ToolbarButton>
       <ToolbarButton
         active={activeTool === 'custom'}
         disabled={tags.length === 0}
+        title="Paint the selected custom collision tag"
         onClick={() => selectedTag && setPaintValue({ Custom: selectedTag })}
       >
         Custom
@@ -66,7 +71,11 @@ export function CollisionControls() {
           </option>
         ))}
       </select>
-      <ToolbarButton active={activeTool === 'erase'} onClick={() => setPaintValue('Walkable')}>
+      <ToolbarButton
+        active={activeTool === 'erase'}
+        title="Erase collision (make the cell walkable)"
+        onClick={() => setPaintValue('Walkable')}
+      >
         Erase
       </ToolbarButton>
     </>

@@ -55,6 +55,14 @@ type CanvasState = {
   // the player. Independent of paint mode and both visibility toggles.
   previewEnabled: boolean;
 
+  // Grid visibility (M14): lifted out of the Canvas component so keyboard
+  // shortcuts, the command palette, and the default-grid preference can drive
+  // it. `grid8` is the 8px tile grid; `grid16` the 16px metatile grid. These
+  // are UI/view preferences, not project data, so they persist across project
+  // switches (they are seeded once from preferences on load).
+  grid8: boolean;
+  grid16: boolean;
+
   setArtwork: (artwork: CanvasArtwork | null) => void;
   setSelected: (selected: boolean) => void;
   setPaintMode: (mode: PaintMode) => void;
@@ -64,6 +72,10 @@ type CanvasState = {
   setOcclusionErase: (erase: boolean) => void;
   setOcclusionBrushSize: (size: number) => void;
   setPreviewEnabled: (enabled: boolean) => void;
+  setGrid8: (visible: boolean) => void;
+  setGrid16: (visible: boolean) => void;
+  toggleGrid8: () => void;
+  toggleGrid16: () => void;
   clear: () => void;
 };
 
@@ -77,6 +89,8 @@ export const useCanvasStore = create<CanvasState>((set) => ({
   occlusionErase: false,
   occlusionBrushSize: 4,
   previewEnabled: false,
+  grid8: false,
+  grid16: false,
 
   setArtwork: (artwork) => set({ artwork, selected: false }),
   setSelected: (selected) => set({ selected }),
@@ -87,7 +101,12 @@ export const useCanvasStore = create<CanvasState>((set) => ({
   setOcclusionErase: (occlusionErase) => set({ occlusionErase }),
   setOcclusionBrushSize: (occlusionBrushSize) => set({ occlusionBrushSize }),
   setPreviewEnabled: (previewEnabled) => set({ previewEnabled }),
-  // Leaving a project resets the tool back to a neutral state.
+  setGrid8: (grid8) => set({ grid8 }),
+  setGrid16: (grid16) => set({ grid16 }),
+  toggleGrid8: () => set((s) => ({ grid8: !s.grid8 })),
+  toggleGrid16: () => set((s) => ({ grid16: !s.grid16 })),
+  // Leaving a project resets the tool back to a neutral state. Grid visibility
+  // is a UI preference, not project state, so it is deliberately not reset here.
   clear: () =>
     set({
       artwork: null,

@@ -1,8 +1,12 @@
 import { useEffect, useState } from 'react';
 import { useProjectStore } from '../store/project';
 import { pickDirectory, pickFile, setPorytilesPath, verifyPorytiles } from '../lib/api';
-import type { BinaryStatus } from '../lib/api';
+import type { AtlasObject, BinaryStatus } from '../lib/api';
 import { BudgetMeter } from './BudgetMeter';
+import { OBJECT_DRAG_TYPE } from './ObjectLibrary';
+
+// Payload for reordering a member within the list (carries its current index).
+const MEMBER_DRAG_TYPE = 'application/x-atlas-member-index';
 
 // Center region when a Tileset is selected: the Builder. Shows the tileset's
 // members, live budget meters (palettes / tiles / metatiles), export, and the
@@ -24,6 +28,8 @@ export function TilesetBuilder() {
   const renameTileset = useProjectStore((s) => s.renameTileset);
   const addMember = useProjectStore((s) => s.addTilesetMember);
   const removeMember = useProjectStore((s) => s.removeTilesetMember);
+  const reorderMember = useProjectStore((s) => s.reorderTilesetMember);
+  const bulkAddToTileset = useProjectStore((s) => s.bulkAddToTileset);
   const refreshBudget = useProjectStore((s) => s.refreshTilesetBudget);
   const runExport = useProjectStore((s) => s.exportTileset);
   const setCompileTarget = useProjectStore((s) => s.setCompileTarget);
@@ -185,40 +191,13 @@ export function TilesetBuilder() {
               />
             </div>
 
-            {tileset.members.length === 0 ? (
-              <p className="text-sm text-fg-subtle">
-                No objects yet. Add objects to build the tileset.
-              </p>
-            ) : (
-              <ul className="space-y-1">
-                {tileset.members.map((memberId) => {
-                  const obj = objectsById.get(memberId);
-                  return (
-                    <li
-                      key={memberId}
-                      className="flex items-center gap-2 rounded bg-bg-panel px-2 py-1.5 text-sm"
-                    >
-                      <span className={`min-w-0 flex-1 truncate ${obj ? 'text-fg' : 'text-fg-subtle italic'}`}>
-                        {obj ? obj.name : 'Missing object'}
-                      </span>
-                      {obj && (
-                        <span className="shrink-0 font-mono text-xs text-fg-subtle">
-                          {obj.width}×{obj.height}
-                        </span>
-                      )}
-                      <button
-                        type="button"
-                        title="Remove from tileset"
-                        onClick={() => removeMember(tileset.id, memberId)}
-                        className="shrink-0 rounded px-1 py-0.5 text-xs text-fg-subtle hover:bg-red-500/20 hover:text-red-300"
-                      >
-                        Remove
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
+            <MemberList
+              members={tileset.members}
+              objectsById={objectsById}
+              onRemove={(memberId) => removeMember(tileset.id, memberId)}
+              onReorder={(from, to) => reorderMember(tileset.id, from, to)}
+              onAddObjects={(ids) => bulkAddToTileset(tileset.id, ids)}
+            />
           </section>
 
           <section className="space-y-2">
@@ -343,6 +322,129 @@ export function TilesetBuilder() {
         </div>
       </div>
     </div>
+  );
+}
+
+// The tileset's members, in layout order (M14): drag a row to reorder, drop an
+// object dragged from the library to add it, or use Remove. Order matters for
+// layout, so reordering is a real (undoable) project edit.
+function MemberList({
+  members,
+  objectsById,
+  onRemove,
+  onReorder,
+  onAddObjects,
+}: {
+  members: string[];
+  objectsById: Map<string, AtlasObject>;
+  onRemove: (memberId: string) => void;
+  onReorder: (from: number, to: number) => void;
+  onAddObjects: (ids: string[]) => void;
+}) {
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [overIndex, setOverIndex] = useState<number | null>(null);
+  const [addTarget, setAddTarget] = useState(false);
+
+  // Accept objects dragged from the Object Library anywhere over the list.
+  const onListDragOver = (e: React.DragEvent) => {
+    if (e.dataTransfer.types.includes(OBJECT_DRAG_TYPE)) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+      if (!addTarget) setAddTarget(true);
+    }
+  };
+  const onListDrop = (e: React.DragEvent) => {
+    setAddTarget(false);
+    const raw = e.dataTransfer.getData(OBJECT_DRAG_TYPE);
+    if (!raw) return;
+    e.preventDefault();
+    try {
+      const ids = JSON.parse(raw) as string[];
+      if (Array.isArray(ids) && ids.length > 0) onAddObjects(ids);
+    } catch {
+      /* malformed payload: ignore */
+    }
+  };
+
+  if (members.length === 0) {
+    return (
+      <div
+        onDragOver={onListDragOver}
+        onDragLeave={() => setAddTarget(false)}
+        onDrop={onListDrop}
+        className={`rounded border border-dashed px-3 py-4 text-sm text-fg-subtle ${
+          addTarget ? 'border-accent bg-accent/10' : 'border-bg-border'
+        }`}
+      >
+        No objects yet. Add objects, or drag them here from the library.
+      </div>
+    );
+  }
+
+  return (
+    <ul
+      onDragOver={onListDragOver}
+      onDragLeave={() => setAddTarget(false)}
+      onDrop={onListDrop}
+      className={`space-y-1 rounded ${addTarget ? 'ring-1 ring-accent' : ''}`}
+    >
+      {members.map((memberId, index) => {
+        const obj = objectsById.get(memberId);
+        return (
+          <li
+            key={memberId}
+            draggable
+            onDragStart={(e) => {
+              e.dataTransfer.setData(MEMBER_DRAG_TYPE, String(index));
+              e.dataTransfer.effectAllowed = 'move';
+              setDragIndex(index);
+            }}
+            onDragEnd={() => {
+              setDragIndex(null);
+              setOverIndex(null);
+            }}
+            onDragOver={(e) => {
+              if (!e.dataTransfer.types.includes(MEMBER_DRAG_TYPE)) return;
+              e.preventDefault();
+              e.dataTransfer.dropEffect = 'move';
+              if (overIndex !== index) setOverIndex(index);
+            }}
+            onDrop={(e) => {
+              if (!e.dataTransfer.types.includes(MEMBER_DRAG_TYPE)) return; // object-add bubbles to the list
+              e.preventDefault();
+              e.stopPropagation();
+              const from = Number(e.dataTransfer.getData(MEMBER_DRAG_TYPE));
+              setOverIndex(null);
+              setDragIndex(null);
+              if (Number.isInteger(from)) onReorder(from, index);
+            }}
+            className={`flex items-center gap-2 rounded bg-bg-panel px-2 py-1.5 text-sm ${
+              overIndex === index && dragIndex !== index ? 'ring-1 ring-accent' : ''
+            } ${dragIndex === index ? 'opacity-50' : ''}`}
+          >
+            <span className="cursor-grab select-none text-fg-subtle" title="Drag to reorder">
+              ⋮⋮
+            </span>
+            <span className={`min-w-0 flex-1 truncate ${obj ? 'text-fg' : 'text-fg-subtle italic'}`}>
+              {obj ? obj.name : 'Missing object'}
+            </span>
+            {obj && (
+              <span className="shrink-0 font-mono text-xs text-fg-subtle">
+                {obj.width}×{obj.height}
+              </span>
+            )}
+            <button
+              type="button"
+              title="Remove from tileset"
+              onClick={() => onRemove(memberId)}
+              className="shrink-0 rounded px-1 py-0.5 text-xs text-fg-subtle hover:bg-red-500/20 hover:text-red-300"
+            >
+              Remove
+            </button>
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
