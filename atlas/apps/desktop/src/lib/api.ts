@@ -79,6 +79,10 @@ export type TilesetBudget = {
   problems: Problem[];
 };
 
+// Result of a tileset export: the directory the artifacts were written to.
+// Mirrors ExportResult in crates/atlas/src/exporter.rs.
+export type ExportResult = { path: string };
+
 // Mirrors the serde structs in crates/atlas/src/project.rs. Rust owns the
 // schema; these types just describe what crosses the IPC boundary.
 export type Project = {
@@ -221,4 +225,15 @@ export async function getTilesetBudget(
   tilesetId: string,
 ): Promise<TilesetBudget> {
   return invoke<TilesetBudget>('tileset_budget', { projectPath, tilesetId });
+}
+
+/// Export a tileset's Porytiles source tree plus .atlasobject artifacts into
+/// `<destDir>/<tileset-slug>/`. Refuses without writing anything when the
+/// tileset has validity problems. Writes outside the project; not undoable.
+export async function exportTileset(
+  projectPath: string,
+  tilesetId: string,
+  destDir: string,
+): Promise<ExportResult> {
+  return invoke<ExportResult>('export_tileset', { projectPath, tilesetId, destDir });
 }

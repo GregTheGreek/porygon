@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useProjectStore } from '../store/project';
+import { pickDirectory } from '../lib/api';
 import type { TilesetBudget } from '../lib/api';
 import { BudgetMeter } from './BudgetMeter';
 
@@ -20,10 +21,17 @@ export function TilesetBuilder() {
   const addMember = useProjectStore((s) => s.addTilesetMember);
   const removeMember = useProjectStore((s) => s.removeTilesetMember);
   const computeBudget = useProjectStore((s) => s.computeTilesetBudget);
+  const runExport = useProjectStore((s) => s.exportTileset);
 
   const [budget, setBudget] = useState<TilesetBudget | null>(null);
   const [computing, setComputing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Export status. Not undoable and outside autosave: export writes outside
+  // the project and never touches project data.
+  const [exporting, setExporting] = useState(false);
+  const [exportedPath, setExportedPath] = useState<string | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   const tilesetId = tileset?.id ?? null;
   // A key that changes whenever membership changes, so budgets recompute.
@@ -54,10 +62,37 @@ export function TilesetBuilder() {
     };
   }, [tilesetId, membersKey, computeBudget]);
 
+  // A stale success/error message would mislead once the tileset or its
+  // membership changes, so export status resets with them.
+  useEffect(() => {
+    setExportedPath(null);
+    setExportError(null);
+  }, [tilesetId, membersKey]);
+
   if (!tileset) return null;
 
   const objectsById = new Map(objects.map((o) => [o.id, o]));
   const available = objects.filter((o) => !tileset.members.includes(o.id));
+
+  const blocked = (budget?.problems.length ?? 0) > 0;
+  const exportDisabled =
+    exporting || computing || tileset.members.length === 0 || blocked;
+
+  const onExport = async () => {
+    const dest = await pickDirectory('Choose where to export the tileset');
+    if (!dest) return;
+    setExporting(true);
+    setExportedPath(null);
+    setExportError(null);
+    try {
+      const result = await runExport(tileset.id, dest);
+      setExportedPath(result.path);
+    } catch (e) {
+      setExportError(String(e));
+    } finally {
+      setExporting(false);
+    }
+  };
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-bg">
@@ -176,6 +211,48 @@ export function TilesetBuilder() {
                   );
                 })}
               </ul>
+            )}
+          </section>
+
+          <section className="space-y-2">
+            <h3 className="text-xs uppercase tracking-wide text-fg-muted">
+              Export
+            </h3>
+            <p className="text-xs text-fg-subtle">
+              Writes the Porytiles source files and one .atlasobject per object
+              into a folder you choose. Nothing in the project changes.
+            </p>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                disabled={exportDisabled}
+                onClick={onExport}
+                title={
+                  blocked
+                    ? 'Fix the problems above first'
+                    : tileset.members.length === 0
+                      ? 'Add objects to the tileset first'
+                      : undefined
+                }
+                className="rounded border border-bg-border bg-bg-input px-3 py-1 text-sm text-fg hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {exporting ? 'Exporting...' : 'Export tileset'}
+              </button>
+              {blocked && (
+                <span className="text-xs text-fg-subtle">
+                  Fix the problems above to enable export.
+                </span>
+              )}
+            </div>
+            {exportedPath && (
+              <p className="break-all rounded border border-green-500/40 bg-green-500/10 px-2 py-1.5 text-xs text-green-200">
+                Exported to {exportedPath}
+              </p>
+            )}
+            {exportError && (
+              <p className="whitespace-pre-wrap rounded border border-red-500/40 bg-red-500/10 px-2 py-1.5 text-xs text-red-200">
+                {exportError}
+              </p>
             )}
           </section>
         </div>

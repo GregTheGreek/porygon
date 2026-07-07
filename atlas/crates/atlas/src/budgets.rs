@@ -138,8 +138,10 @@ pub fn infer_layer_type(bottom: bool, middle: bool, top: bool) -> CellLayer {
 }
 
 /// A pixel that consumes no palette entry: fully transparent, or the magenta
-/// sentinel that becomes transparency in the layer PNGs.
-fn is_transparent(px: [u8; 4]) -> bool {
+/// sentinel that becomes transparency in the layer PNGs. Shared with the
+/// exporter (M10) so prediction and emission can never disagree about which
+/// pixels exist.
+pub(crate) fn is_transparent(px: [u8; 4]) -> bool {
     px[3] == 0 || [px[0], px[1], px[2]] == TRANSPARENT_RGB
 }
 
@@ -490,37 +492,69 @@ fn build_problems(
     problems
 }
 
-/// Read a tileset's members from disk, decode their artwork, and compute the
-/// budget. The fs-touching orchestration behind the IPC command; the maths lives
-/// in `compute`. Returns a plain error string for the UI.
-pub fn compute_for_tileset(project_dir: &str, tileset_id: &str) -> Result<TilesetBudget, String> {
+/// A member Object with its artwork decoded from disk: the shared input for
+/// budget prediction (M9) and export (M10). Both paths load members through
+/// `load_members`, so they can never disagree about membership, pixel data, or
+/// stale-id handling - the reconciliation compiler.md's determinism note asks
+/// for is structural, not by convention.
+pub struct LoadedMember {
+    pub object: crate::object::Object,
+    pub art: crate::artwork::DecodedArtwork,
+}
+
+impl LoadedMember {
+    /// The budget-maths view of this member.
+    pub fn member_art(&self) -> MemberArt {
+        MemberArt {
+            name: self.object.name.clone(),
+            width: self.art.width,
+            height: self.art.height,
+            pixels: self.art.pixels.clone(),
+            occluding: self.object.occlusion.pixels.clone(),
+        }
+    }
+}
+
+/// Read a tileset and its members' decoded artwork from disk. Members keep the
+/// tileset's stable authoring order (the exporter's layout order). Returns a
+/// plain error string for the UI.
+pub fn load_members(
+    project_dir: &str,
+    tileset_id: &str,
+) -> Result<(crate::tileset::Tileset, Vec<LoadedMember>), String> {
     let open = crate::project::read(project_dir).map_err(|e| e.to_string())?;
     let tileset = open
         .project
         .tilesets
         .iter()
         .find(|t| t.id == tileset_id)
+        .cloned()
         .ok_or_else(|| "Tileset not found.".to_string())?;
 
     let mut members = Vec::with_capacity(tileset.members.len());
     for member_id in &tileset.members {
         // A membership id that no longer resolves to an Object is skipped
         // rather than fatal: deletion scrubs ids, but a stale hand-edited file
-        // should still budget the objects it can find.
+        // should still budget/export the objects it can find.
         let Some(obj) = open.project.objects.iter().find(|o| &o.id == member_id) else {
             continue;
         };
-        let decoded = crate::object::decode_artwork(project_dir, &obj.id)
+        let art = crate::object::decode_artwork(project_dir, &obj.id)
             .map_err(|e| format!("Could not read artwork for \"{}\": {e}", obj.name))?;
-        members.push(MemberArt {
-            name: obj.name.clone(),
-            width: decoded.width,
-            height: decoded.height,
-            pixels: decoded.pixels,
-            occluding: obj.occlusion.pixels.clone(),
+        members.push(LoadedMember {
+            object: obj.clone(),
+            art,
         });
     }
+    Ok((tileset, members))
+}
 
+/// Read a tileset's members from disk, decode their artwork, and compute the
+/// budget. The fs-touching orchestration behind the IPC command; the maths lives
+/// in `compute`. Returns a plain error string for the UI.
+pub fn compute_for_tileset(project_dir: &str, tileset_id: &str) -> Result<TilesetBudget, String> {
+    let (_tileset, loaded) = load_members(project_dir, tileset_id)?;
+    let members: Vec<MemberArt> = loaded.iter().map(LoadedMember::member_art).collect();
     Ok(compute(&members, crate::pokemon_emerald::secondary_budgets()))
 }
 

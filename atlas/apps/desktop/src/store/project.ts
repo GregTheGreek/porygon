@@ -5,6 +5,7 @@ import type {
   AtlasObject,
   Collision,
   CollisionValue,
+  ExportResult,
   Occlusion,
   OpenProject,
   Recent,
@@ -90,6 +91,11 @@ type ProjectState = {
   // first is required: the Rust budget command reads member artwork and the
   // saved membership from disk, so it must see the latest state.
   computeTilesetBudget: (tilesetId: string) => Promise<TilesetBudget>;
+
+  // Persist the project, then export the tileset to a destination directory
+  // (M10). Not undoable: export writes outside the project and never touches
+  // project data, so nothing lands in the history stack.
+  exportTileset: (tilesetId: string, destDir: string) => Promise<ExportResult>;
 };
 
 export const useProjectStore = create<ProjectState>((set, get) => {
@@ -725,6 +731,21 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       const project = await api.saveProject(current.path, current.project);
       set((s) => ({ open: s.open ? { ...s.open, project } : null }));
       return api.getTilesetBudget(current.path, tilesetId);
+    },
+
+    exportTileset: async (tilesetId, destDir) => {
+      const current = get().open;
+      if (!current) throw new Error('No project open.');
+      // Persist first, like computeTilesetBudget: the Rust exporter reads
+      // membership and member artwork from disk, so it must see the latest
+      // state. Cancel the pending debounced save (this write supersedes it).
+      if (saveTimer) {
+        clearTimeout(saveTimer);
+        saveTimer = null;
+      }
+      const project = await api.saveProject(current.path, current.project);
+      set((s) => ({ open: s.open ? { ...s.open, project } : null }));
+      return api.exportTileset(current.path, tilesetId, destDir);
     },
   };
 });

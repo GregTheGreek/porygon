@@ -3,6 +3,7 @@
 mod artwork;
 mod budgets;
 mod collision;
+mod exporter;
 mod object;
 mod occlusion;
 mod pokemon_emerald;
@@ -17,6 +18,7 @@ use tauri::{AppHandle, Manager};
 
 use artwork::Artwork;
 use budgets::TilesetBudget;
+use exporter::ExportResult;
 use object::Object;
 use pokemon_emerald::CollisionTag;
 use project::{OpenProject, Project};
@@ -149,6 +151,20 @@ fn tileset_budget(project_path: String, tileset_id: String) -> Result<TilesetBud
     budgets::compute_for_tileset(&project_path, &tileset_id)
 }
 
+/// Export a tileset per compiler.md (M10): write the Porytiles-ready source
+/// tree plus one Compiled Object (.atlasobject) per member into
+/// `<dest_dir>/<tileset-slug>/`. Refuses with the validity problems (and writes
+/// nothing) when the tileset is not exportable. Reads project state from disk
+/// and never mutates it - export is not undoable and outside autosave.
+#[tauri::command]
+fn export_tileset(
+    project_path: String,
+    tileset_id: String,
+    dest_dir: String,
+) -> Result<ExportResult, String> {
+    exporter::export_tileset(&project_path, &tileset_id, &dest_dir)
+}
+
 #[tauri::command]
 fn get_recent_projects(app: AppHandle) -> Result<Vec<Recent>, String> {
     let file = recents_file(&app)?;
@@ -176,6 +192,7 @@ pub fn run() {
             object_problems,
             create_tileset,
             tileset_budget,
+            export_tileset,
             get_recent_projects
         ])
         .run(tauri::generate_context!())
