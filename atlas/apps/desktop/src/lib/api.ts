@@ -255,11 +255,6 @@ export async function pickPngFile(): Promise<string | null> {
   return typeof result === 'string' ? result : null;
 }
 
-/// Read, validate, and load a PNG through Rust (no fs plugin needed).
-export async function readArtwork(path: string): Promise<Artwork> {
-  return invoke<Artwork>('read_artwork', { path });
-}
-
 /// Import a PNG as a new Object; copies the artwork into the project directory.
 export async function importObject(
   projectPath: string,

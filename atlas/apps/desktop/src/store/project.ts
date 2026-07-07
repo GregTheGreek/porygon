@@ -665,7 +665,14 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         clearTimeout(saveTimer);
         saveTimer = null;
         const current = get().open;
-        if (current) void api.saveProject(current.path, current.project);
+        // Best-effort final flush. The session is torn down regardless; swallow
+        // so a failed write cannot surface as an unhandled rejection after the
+        // project is already gone from the UI.
+        if (current) {
+          void api
+            .saveProject(current.path, current.project)
+            .catch(() => undefined);
+        }
       }
       resetSession();
       set({ open: null, status: 'idle', error: null });

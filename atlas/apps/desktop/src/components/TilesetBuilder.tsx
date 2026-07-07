@@ -119,8 +119,12 @@ export function TilesetBuilder() {
   const onLocatePorytiles = async () => {
     const path = await pickFile('Locate the porytiles binary');
     if (!path) return;
-    await setPorytilesPath(path);
-    setBinary(await verifyPorytiles());
+    try {
+      await setPorytilesPath(path);
+      setBinary(await verifyPorytiles());
+    } catch (e) {
+      setBinary({ ok: false, path, version: null, message: String(e) });
+    }
   };
 
   return (

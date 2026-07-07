@@ -89,13 +89,6 @@ fn save_project(app: AppHandle, path: String, project: Project) -> Result<Projec
     Ok(saved)
 }
 
-/// Read a PNG the user picked for the Canvas. Session-scoped: nothing is
-/// persisted (Objects, M4, own artwork). Returns bytes (base64) + dimensions.
-#[tauri::command]
-fn read_artwork(path: String) -> Result<Artwork, String> {
-    artwork::read(&path).map_err(|e| e.to_string())
-}
-
 /// Import a PNG as a new Object: copy it into `objects/<uuid>/artwork.png` and
 /// return the Object metadata. The frontend adds it to project.json and saves.
 #[tauri::command]
@@ -307,7 +300,6 @@ pub fn run() {
             create_project,
             open_project,
             save_project,
-            read_artwork,
             import_object,
             duplicate_object,
             trash_object,

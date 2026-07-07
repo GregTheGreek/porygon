@@ -863,6 +863,37 @@ mod tests {
     }
 
     #[test]
+    fn missing_artwork_file_fails_soft_with_a_clear_message() {
+        // A project can refer to an Object whose artwork PNG has vanished from
+        // disk (moved/deleted outside the app). Both the Tier 2 budget path and
+        // export must fail with a readable message naming the object, and export
+        // must write nothing.
+        let (obj, pixels) = solid_object("Ghost", 16, 16, [1, 2, 3], false);
+        let obj_id = obj.id.clone();
+        let (project, tileset_id) = project_with(vec![(obj, pixels)]);
+        // Delete the object's artwork after the project is on disk.
+        fs::remove_file(project.join(OBJECTS_DIR).join(&obj_id).join(ARTWORK_FILE)).unwrap();
+
+        let budget_err =
+            crate::budgets::compute_for_tileset(project.to_str().unwrap(), &tileset_id)
+                .unwrap_err();
+        assert!(
+            budget_err.contains("Could not read artwork") && budget_err.contains("\"Ghost\""),
+            "budget error should name the object: {budget_err}"
+        );
+
+        let dest = temp_dir("missing-art");
+        let export_err =
+            export_tileset(project.to_str().unwrap(), &tileset_id, dest.to_str().unwrap())
+                .unwrap_err();
+        assert!(
+            export_err.contains("Could not read artwork") && export_err.contains("\"Ghost\""),
+            "export error should name the object: {export_err}"
+        );
+        assert_eq!(fs::read_dir(&dest).unwrap().count(), 0, "export wrote nothing");
+    }
+
+    #[test]
     fn transparent_and_magenta_pixels_emit_as_transparency() {
         // Alpha-0 and magenta source pixels both become fully transparent in
         // the emitted sheets (the shared is_transparent rule).

@@ -16,6 +16,16 @@
 
 import { create } from 'zustand';
 
+import { useProjectStore } from './project';
+
+// Surface a failed undo/redo through the project store's error field (the same
+// channel store actions use), so a filesystem failure mid-undo is shown to the
+// artist rather than lost as an unhandled rejection. Imported lazily via
+// getState() at call time, so the project<->history module cycle stays safe.
+function reportHistoryError(action: 'undo' | 'redo', e: unknown) {
+  useProjectStore.setState({ error: `Could not ${action}: ${String(e)}` });
+}
+
 export type Command = {
   label: string;
   undo: () => Promise<void> | void;
@@ -51,6 +61,10 @@ export const useHistory = create<HistoryState>((set, get) => ({
         past: s.past.slice(0, -1),
         future: [...s.future, command],
       }));
+    } catch (e) {
+      // Leave the command on the past stack (it did not fully reverse) so the
+      // artist can retry, and surface why it failed.
+      reportHistoryError('undo', e);
     } finally {
       set({ busy: false });
     }
@@ -67,6 +81,10 @@ export const useHistory = create<HistoryState>((set, get) => ({
         future: s.future.slice(0, -1),
         past: [...s.past, command],
       }));
+    } catch (e) {
+      // Leave the command on the future stack (it did not fully re-apply) so
+      // the artist can retry, and surface why it failed.
+      reportHistoryError('redo', e);
     } finally {
       set({ busy: false });
     }

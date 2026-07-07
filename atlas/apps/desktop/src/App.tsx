@@ -68,7 +68,11 @@ export function App() {
       .then((fn) => {
         if (disposed) fn();
         else unlisten = fn;
-      });
+      })
+      // Registering the OS drag-drop listener is best-effort: if it fails the
+      // window just will not accept dropped files. Swallow so it cannot become
+      // an unhandled rejection.
+      .catch(() => undefined);
     return () => {
       disposed = true;
       unlisten?.();
