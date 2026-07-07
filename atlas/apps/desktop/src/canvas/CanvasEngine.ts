@@ -1,3 +1,7 @@
+// Pixi's WebGL renderer generates shader/uniform code with `new Function`,
+// which our strict CSP (no unsafe-eval) blocks. This official module swaps in
+// a CSP-safe implementation; it must load before the renderer is created.
+import 'pixi.js/unsafe-eval';
 import {
   Application,
   Container,
@@ -27,6 +31,11 @@ const MAX_SCALE = 32;
 const FIT_PADDING = 0.9;
 // exp(-deltaY * SENSITIVITY): ~1.2x per typical mouse-wheel notch (deltaY 100).
 const ZOOM_SENSITIVITY = 0.0018;
+// Per press/click of the keyboard shortcuts and +/- buttons.
+const KEY_ZOOM_STEP = 1.5;
+
+// WebKit's proprietary pinch event (Safari/WKWebView only; not in lib.dom).
+type WebKitGestureEvent = Event & { scale: number; clientX: number; clientY: number };
 // Pointer travel (px) under which a press counts as a click, not a drag.
 const CLICK_SLOP = 4;
 
@@ -83,6 +92,9 @@ export class CanvasEngine {
 
     this.app = new Application();
     await this.app.init({
+      // WKWebView advertises WebGPU but Pixi's WebGPU path is unreliable
+      // there; WebGL is fully sufficient for this workload.
+      preference: 'webgl',
       width: this.viewportW,
       height: this.viewportH,
       background: 0x1e1e20,
@@ -188,6 +200,11 @@ export class CanvasEngine {
     this.afterTransform();
   }
 
+  /** Zoom by a factor, centered on the viewport center (buttons/keyboard). */
+  zoomStep(factor: number): void {
+    this.zoomAt(this.viewportW / 2, this.viewportH / 2, factor);
+  }
+
   // --- Transform helpers ---
 
   private zoomAt(sx: number, sy: number, factor: number): void {
@@ -265,6 +282,10 @@ export class CanvasEngine {
     this.canvas.addEventListener('pointerup', this.onPointerUp);
     // context menu off so middle/right drags feel native.
     this.canvas.addEventListener('contextmenu', this.onContextMenu);
+    // WebKit delivers trackpad pinch as proprietary gesture events, not
+    // ctrl+wheel like Chromium. Without these, a trackpad cannot zoom.
+    this.canvas.addEventListener('gesturestart', this.onGestureStart as EventListener);
+    this.canvas.addEventListener('gesturechange', this.onGestureChange as EventListener);
     window.addEventListener('keydown', this.onKeyDown);
     window.addEventListener('keyup', this.onKeyUp);
   }
@@ -275,6 +296,8 @@ export class CanvasEngine {
     this.canvas?.removeEventListener('pointermove', this.onPointerMove);
     this.canvas?.removeEventListener('pointerup', this.onPointerUp);
     this.canvas?.removeEventListener('contextmenu', this.onContextMenu);
+    this.canvas?.removeEventListener('gesturestart', this.onGestureStart as EventListener);
+    this.canvas?.removeEventListener('gesturechange', this.onGestureChange as EventListener);
     window.removeEventListener('keydown', this.onKeyDown);
     window.removeEventListener('keyup', this.onKeyUp);
   }
@@ -345,7 +368,46 @@ export class CanvasEngine {
 
   private onContextMenu = (e: Event): void => e.preventDefault();
 
+  // Cumulative pinch scale at the last gesture event; WebKit reports scale
+  // relative to gesture start, so we apply the ratio between events.
+  private gestureScale = 1;
+
+  private onGestureStart = (e: WebKitGestureEvent): void => {
+    e.preventDefault();
+    this.gestureScale = 1;
+  };
+
+  private onGestureChange = (e: WebKitGestureEvent): void => {
+    e.preventDefault();
+    if (!e.scale) return;
+    const p = this.localPoint(e);
+    this.zoomAt(p.x, p.y, e.scale / this.gestureScale);
+    this.gestureScale = e.scale;
+  };
+
   private onKeyDown = (e: KeyboardEvent): void => {
+    // Never react while the user is typing (e.g. project rename).
+    const t = e.target as HTMLElement | null;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) {
+      return;
+    }
+    if (e.metaKey || e.ctrlKey) {
+      // Photoshop-style: cmd+/- zoom, cmd+0 fit, cmd+1 100%.
+      if (e.key === '=' || e.key === '+') {
+        e.preventDefault();
+        this.zoomStep(KEY_ZOOM_STEP);
+      } else if (e.key === '-') {
+        e.preventDefault();
+        this.zoomStep(1 / KEY_ZOOM_STEP);
+      } else if (e.key === '0') {
+        e.preventDefault();
+        this.fit();
+      } else if (e.key === '1') {
+        e.preventDefault();
+        this.reset100();
+      }
+      return;
+    }
     if (e.code === 'Space' && !this.spaceDown) {
       this.spaceDown = true;
       this.updateCursor();

@@ -17,6 +17,7 @@ export function Canvas() {
   const [zoom, setZoom] = useState(100);
   const [show8, setShow8] = useState(false);
   const [show16, setShow16] = useState(false);
+  const [engineError, setEngineError] = useState<string | null>(null);
 
   // Create the Pixi engine once. Init is async, so guard against unmount.
   useEffect(() => {
@@ -43,6 +44,11 @@ export function Canvas() {
         engine.setGrid({ show8, show16 });
         const current = useCanvasStore.getState().artwork;
         if (current) void engine.loadArtwork(current);
+      })
+      .catch((e: unknown) => {
+        // A failed renderer init must be visible, not a silent blank canvas.
+        console.error('Canvas engine init failed:', e);
+        if (!disposed) setEngineError(`Canvas failed to initialize: ${String(e)}`);
       });
 
     return () => {
@@ -80,6 +86,12 @@ export function Canvas() {
           <GridToggle label="8" title="Toggle 8px tile grid" active={show8} onClick={() => setShow8((v) => !v)} />
           <GridToggle label="16" title="Toggle 16px metatile grid" active={show16} onClick={() => setShow16((v) => !v)} />
           <span className="mx-1 h-4 w-px bg-bg-border" />
+          <CanvasButton disabled={!hasArtwork} onClick={() => engineRef.current?.zoomStep(1 / 1.5)}>
+            −
+          </CanvasButton>
+          <CanvasButton disabled={!hasArtwork} onClick={() => engineRef.current?.zoomStep(1.5)}>
+            +
+          </CanvasButton>
           <CanvasButton disabled={!hasArtwork} onClick={() => engineRef.current?.fit()}>
             Fit
           </CanvasButton>
@@ -109,9 +121,9 @@ export function Canvas() {
           </div>
         )}
 
-        {error && (
+        {(engineError ?? error) && (
           <p className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded border border-red-500/40 bg-red-500/10 px-3 py-1.5 text-xs text-red-300">
-            {error}
+            {engineError ?? error}
           </p>
         )}
       </div>
