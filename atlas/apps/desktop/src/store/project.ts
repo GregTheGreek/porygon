@@ -5,6 +5,7 @@ import type {
   AtlasObject,
   Collision,
   CollisionValue,
+  CompileResult,
   ExportResult,
   Occlusion,
   OpenProject,
@@ -50,6 +51,16 @@ type ProjectState = {
   // undoable.
   selectedTilesetId: string | null;
 
+  // Tier 2/3 derived state for the selected tileset, lifted into the store so
+  // the Tileset Builder and the shared Problems panel read one source of truth.
+  // Cleared whenever the selection or membership changes (would be stale).
+  budget: TilesetBudget | null;
+  budgetComputing: boolean;
+  budgetError: string | null;
+  compileResult: CompileResult | null;
+  compiling: boolean;
+  compileError: string | null;
+
   loadRecents: () => Promise<void>;
   createProject: (location: string, name: string) => Promise<void>;
   openProject: (dir: string) => Promise<void>;
@@ -87,15 +98,26 @@ type ProjectState = {
   addTilesetMember: (tilesetId: string, objectId: string) => void;
   removeTilesetMember: (tilesetId: string, objectId: string) => void;
 
-  // Persist the project, then compute the Tier 2 budget for a tileset. Saving
-  // first is required: the Rust budget command reads member artwork and the
-  // saved membership from disk, so it must see the latest state.
-  computeTilesetBudget: (tilesetId: string) => Promise<TilesetBudget>;
+  // Persist the project, then compute the Tier 2 budget for a tileset and store
+  // it. Saving first is required: the Rust budget command reads member artwork
+  // and the saved membership from disk, so it must see the latest state. Guards
+  // against a stale write when the selection changes mid-flight.
+  refreshTilesetBudget: (tilesetId: string) => Promise<void>;
 
   // Persist the project, then export the tileset to a destination directory
   // (M10). Not undoable: export writes outside the project and never touches
   // project data, so nothing lands in the history stack.
   exportTileset: (tilesetId: string, destDir: string) => Promise<ExportResult>;
+
+  // The persisted per-project compile target (a decomp project directory).
+  // Plain project edit + save; not undoable (it is a target, not content).
+  setCompileTarget: (dir: string) => void;
+
+  // Persist the project, then compile the tileset with Porytiles into the
+  // stored compile target (M11): export -> create/compile -> prefabs. Stores
+  // the mapped result; a pre-flight throw (bad binary etc.) lands in
+  // compileError. Not undoable: it writes outside the project.
+  compileTileset: (tilesetId: string) => Promise<void>;
 };
 
 export const useProjectStore = create<ProjectState>((set, get) => {
@@ -124,6 +146,21 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     saveTimer = setTimeout(() => {
       void flushSave();
     }, AUTOSAVE_DELAY_MS);
+  };
+
+  // Persist immediately, superseding any pending debounced save, and return the
+  // saved project. Used before Rust calls that read the project from disk
+  // (budget, export, compile), so they always see the latest membership.
+  const persistNow = async () => {
+    const current = get().open;
+    if (!current) return null;
+    if (saveTimer) {
+      clearTimeout(saveTimer);
+      saveTimer = null;
+    }
+    const project = await api.saveProject(current.path, current.project);
+    set((s) => ({ open: s.open ? { ...s.open, project } : null }));
+    return project;
   };
 
   // --- Object list mutators. Pure state edits; callers schedule the save and
@@ -283,10 +320,23 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         : s,
     );
 
+  // Drop the Tier 2/3 derived state: it belongs to one tileset+membership and
+  // is stale the moment either changes.
+  const clearTilesetDerived = () =>
+    set({
+      budget: null,
+      budgetComputing: false,
+      budgetError: null,
+      compileResult: null,
+      compiling: false,
+      compileError: null,
+    });
+
   // Leaving a project: drop objects, selection, undo history, and the Canvas.
   const resetSession = () => {
     useHistory.getState().clear();
     useCanvasStore.getState().clear();
+    clearTilesetDerived();
     set({ selectedObjectId: null, selectedTilesetId: null, importing: false });
   };
 
@@ -298,6 +348,12 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     selectedObjectId: null,
     importing: false,
     selectedTilesetId: null,
+    budget: null,
+    budgetComputing: false,
+    budgetError: null,
+    compileResult: null,
+    compiling: false,
+    compileError: null,
 
     loadRecents: async () => {
       try {
@@ -603,6 +659,8 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     },
 
     selectTileset: (id) => {
+      // Switching tilesets invalidates the Tier 2/3 derived state.
+      if (id !== get().selectedTilesetId) clearTilesetDerived();
       // Opening a Tileset closes any open object (they share the center view).
       set({ selectedTilesetId: id });
       if (id !== null && get().selectedObjectId !== null) {
@@ -684,6 +742,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       const previous = tileset.members;
       const next = [...previous, objectId];
       patchTileset(tilesetId, { members: next });
+      set({ compileResult: null, compileError: null });
       scheduleSave();
       useHistory.getState().push({
         label: 'Add to tileset',
@@ -704,6 +763,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       const previous = tileset.members;
       const next = previous.filter((m) => m !== objectId);
       patchTileset(tilesetId, { members: next });
+      set({ compileResult: null, compileError: null });
       scheduleSave();
       useHistory.getState().push({
         label: 'Remove from tileset',
@@ -718,34 +778,70 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       });
     },
 
-    computeTilesetBudget: async (tilesetId) => {
+    refreshTilesetBudget: async (tilesetId) => {
       const current = get().open;
-      if (!current) throw new Error('No project open.');
-      // Persist first: the Rust budget command reads membership and member
-      // artwork from disk, so it must see the latest state. Cancel the pending
-      // debounced save (this write supersedes it).
-      if (saveTimer) {
-        clearTimeout(saveTimer);
-        saveTimer = null;
+      if (!current) return;
+      set({ budgetComputing: true });
+      try {
+        const project = await persistNow();
+        if (!project) return;
+        const budget = await api.getTilesetBudget(current.path, tilesetId);
+        // Guard a stale write: the artist may have switched tilesets in flight.
+        if (get().selectedTilesetId !== tilesetId) return;
+        set({ budget, budgetError: null });
+      } catch (e) {
+        if (get().selectedTilesetId === tilesetId) {
+          set({ budgetError: String(e) });
+        }
+      } finally {
+        if (get().selectedTilesetId === tilesetId) set({ budgetComputing: false });
       }
-      const project = await api.saveProject(current.path, current.project);
-      set((s) => ({ open: s.open ? { ...s.open, project } : null }));
-      return api.getTilesetBudget(current.path, tilesetId);
     },
 
     exportTileset: async (tilesetId, destDir) => {
       const current = get().open;
       if (!current) throw new Error('No project open.');
-      // Persist first, like computeTilesetBudget: the Rust exporter reads
-      // membership and member artwork from disk, so it must see the latest
-      // state. Cancel the pending debounced save (this write supersedes it).
-      if (saveTimer) {
-        clearTimeout(saveTimer);
-        saveTimer = null;
-      }
-      const project = await api.saveProject(current.path, current.project);
-      set((s) => ({ open: s.open ? { ...s.open, project } : null }));
+      const project = await persistNow();
+      if (!project) throw new Error('No project open.');
       return api.exportTileset(current.path, tilesetId, destDir);
+    },
+
+    setCompileTarget: (dir) => {
+      set((s) =>
+        s.open
+          ? {
+              open: {
+                ...s.open,
+                project: { ...s.open.project, compile_target: dir },
+              },
+            }
+          : s,
+      );
+      scheduleSave();
+    },
+
+    compileTileset: async (tilesetId) => {
+      const current = get().open;
+      if (!current) return;
+      const decompDir = current.project.compile_target;
+      if (!decompDir) {
+        set({ compileError: 'Choose a target decomp project first.' });
+        return;
+      }
+      set({ compiling: true, compileError: null, compileResult: null });
+      try {
+        // Persist first: the Rust compiler reads membership and artwork from
+        // disk. (This also writes the just-picked compile target.)
+        const project = await persistNow();
+        if (!project) return;
+        const result = await api.compileTileset(current.path, tilesetId, decompDir);
+        if (get().selectedTilesetId !== tilesetId) return;
+        set({ compileResult: result });
+      } catch (e) {
+        if (get().selectedTilesetId === tilesetId) set({ compileError: String(e) });
+      } finally {
+        if (get().selectedTilesetId === tilesetId) set({ compiling: false });
+      }
     },
   };
 });

@@ -1,0 +1,314 @@
+remark [base-game-detection]:
+│
+│ Detected base game 'pokeemerald-expansion'.
+│
+note [base-game-detection]:
+│
+│ Found both METATILE_ATTRIBUTE_BEHAVIOR and METATILE_ATTR_BEHAVIOR_MASK in '<project>/include/global.fieldmap.h'.
+│
+remark [resolve-partner-primary]:
+│
+│ Resolved partner primary 'gTileset_AtlasBase' for secondary 'gTileset_AtlasSpike'.
+│
+note [resolve-partner-primary]:
+│
+│ 'Primary Pairing Mode' is 'manual' due to configuration:
+│ 
+│ --primary-pairing-mode = manual
+│ Source: CLI
+│ 
+│ --------
+│ 
+│ 'Primary Pairing Partners' is '["gTileset_AtlasBase"]' due to configuration:
+│ 
+│ --primary-pairing-partners = ["gTileset_AtlasBase"]
+│ Source: CLI
+│
+error [layer-mode-violation]:
+│
+│ metatile 0x0(0)|northwest(0): non-transparent content on all three layers
+│ 
+│ ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│ 
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│ 
+│ 
+│ ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│ 
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│ 
+│ 
+│ ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│ 
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│ 
+│
+error [layer-mode-violation]:
+│
+│ metatile 0x0(0)|northeast(1): non-transparent content on all three layers
+│ 
+│                  ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│ 
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│ 
+│ 
+│                  ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│ 
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│ 
+│ 
+│                  ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│ 
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│ 
+│
+error [layer-mode-violation]:
+│
+│ metatile 0x0(0)|southwest(2): non-transparent content on all three layers
+│ 
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│ 
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│ ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
+│ 
+│ 
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│ 
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│ ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
+│ 
+│ 
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│ 
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│ ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
+│ 
+│
+error [layer-mode-violation]:
+│
+│ metatile 0x0(0)|southeast(3): non-transparent content on all three layers
+│ 
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│ 
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                  ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
+│ 
+│ 
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│ 
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                  ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
+│ 
+│ 
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│ 
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                  ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
+│ 
+│
+note [layer-mode-violation]:
+│
+│ Implied layer mode is 'dual'.
+│ 
+│ 'Number Of Tiles Per Metatile' is '8' due to configuration:
+│ 
+│ NUM_TILES_PER_METATILE = 8
+│ Source: <project>/include/fieldmap.h:8
+│ 
+│    4:   #define NUM_METATILES_TOTAL 1024
+│    5:   #define NUM_TILES_TOTAL 1024
+│    6:   #define NUM_PALS_TOTAL 13
+│    7:   #define MAX_MAP_DATA_SIZE 10240
+│ ➞  8:   #define NUM_TILES_PER_METATILE 8
+│ 
+│ Consider enabling triple-layer metatiles.
+│ To enable layer mode 'triple' for your project:
+│    - set 'Number Of Tiles Per Metatile' = '12'
+│    - follow the steps here: https://github.com/pret/pokeemerald/wiki/Triple-layer-metatiles
+│
+fatal:
+│
+│ Failed to compile tileset 'gTileset_AtlasSpike'.
+│
+├ caused by:
+│ 
+│ Compilation job failed for 'gTileset_AtlasSpike'.
+│
+├ root cause:
+│ 
+│ Found metatile(s) with mismatched implied layer mode.
+│

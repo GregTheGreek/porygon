@@ -5,6 +5,7 @@ import { Inspector } from './Inspector';
 import { ObjectLibrary } from './ObjectLibrary';
 import { TilesetLibrary } from './TilesetLibrary';
 import { TilesetBuilder } from './TilesetBuilder';
+import { ProblemsPanel } from './ProblemsPanel';
 import { ResizeHandle } from './ResizeHandle';
 import { useProjectStore } from '../store/project';
 
@@ -75,7 +76,7 @@ export function Workspace() {
           Runtime preview will appear here.
         </Panel>
         <Panel title="Problems" className="flex-1 border-r border-bg-border">
-          No problems detected.
+          <ProblemsPanel />
         </Panel>
         <Panel title="Export" className="flex-1">
           No export target configured.

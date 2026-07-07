@@ -43,6 +43,10 @@ pub const SECONDARY_TILE_BUDGET: u32 = 512;
 pub const SECONDARY_METATILE_BUDGET: u32 = 512;
 /// Palette slots a secondary tileset may use (indices 6-12).
 pub const SECONDARY_PALETTE_BUDGET: u32 = 7;
+/// Total metatile ids across primary + secondary (`NUM_METATILES_TOTAL`,
+/// FINDINGS "Verified engine constants"). Porymap drops prefab cells whose
+/// `metatile_id >= NUM_METATILES_TOTAL`, so prefab emission validates against it.
+pub const METATILES_TOTAL: u32 = 1024;
 /// Usable colours in one palette (the 16th slot is transparency).
 pub const COLORS_PER_PALETTE: u32 = 15;
 /// Tile edge in pixels.

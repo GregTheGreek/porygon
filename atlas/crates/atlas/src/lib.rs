@@ -7,8 +7,11 @@ mod exporter;
 mod object;
 mod occlusion;
 mod pokemon_emerald;
+mod porytiles;
+mod prefabs;
 mod project;
 mod recents;
+mod settings;
 mod tileset;
 mod validity;
 
@@ -21,8 +24,10 @@ use budgets::TilesetBudget;
 use exporter::ExportResult;
 use object::Object;
 use pokemon_emerald::CollisionTag;
+use porytiles::{BinaryStatus, CompileResult};
 use project::{OpenProject, Project};
 use recents::Recent;
+use settings::Settings;
 use tileset::Tileset;
 use validity::Problem;
 
@@ -37,6 +42,12 @@ fn app_version() -> String {
 fn recents_file(app: &AppHandle) -> Result<PathBuf, String> {
     let dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
     Ok(dir.join("recents.json"))
+}
+
+/// Path to the app settings file inside the app config dir.
+fn settings_file(app: &AppHandle) -> Result<PathBuf, String> {
+    let dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
+    Ok(dir.join("settings.json"))
 }
 
 /// Record a project as the most-recent one, keeping the stored name in sync.
@@ -165,6 +176,49 @@ fn export_tileset(
     exporter::export_tileset(&project_path, &tileset_id, &dest_dir)
 }
 
+/// The persisted app settings (currently just the Porytiles binary path).
+#[tauri::command]
+fn get_settings(app: AppHandle) -> Result<Settings, String> {
+    Ok(settings::load(&settings_file(&app)?))
+}
+
+/// Override the Porytiles binary path (or clear it to fall back to the default).
+/// Persisted app-side like recents; returns the saved settings.
+#[tauri::command]
+fn set_porytiles_path(app: AppHandle, path: Option<String>) -> Result<Settings, String> {
+    let file = settings_file(&app)?;
+    let mut current = settings::load(&file);
+    current.porytiles_path = path.filter(|p| !p.trim().is_empty());
+    settings::save(&file, &current)?;
+    Ok(current)
+}
+
+/// Check the configured Porytiles binary: is it present and exactly the pinned
+/// version? Drives the compile-readiness UI. Never fails; a missing or wrong
+/// binary comes back as `ok: false` with an artist-facing message.
+#[tauri::command]
+fn verify_porytiles(app: AppHandle) -> Result<BinaryStatus, String> {
+    let path = settings::load(&settings_file(&app)?).effective_porytiles_path();
+    Ok(porytiles::verify(&path))
+}
+
+/// Compile a tileset with Porytiles into the target decomp project (M11): runs
+/// the export -> create/compile -> prefabs loop. Returns success with the
+/// written paths, or a mapped Tier 3 problem (raw output kept in `details`).
+/// Refuses (Err) only for pre-flight failures: a bad binary, a Tier 1/2 gate, or
+/// a filesystem error. The frontend gates the button the same way export is
+/// gated, so a Tier 1/2 refusal here is a backstop.
+#[tauri::command]
+fn compile_tileset(
+    app: AppHandle,
+    project_path: String,
+    tileset_id: String,
+    decomp_dir: String,
+) -> Result<CompileResult, String> {
+    let path = settings::load(&settings_file(&app)?).effective_porytiles_path();
+    porytiles::compile_tileset(&project_path, &tileset_id, &decomp_dir, &path)
+}
+
 #[tauri::command]
 fn get_recent_projects(app: AppHandle) -> Result<Vec<Recent>, String> {
     let file = recents_file(&app)?;
@@ -193,6 +247,10 @@ pub fn run() {
             create_tileset,
             tileset_budget,
             export_tileset,
+            get_settings,
+            set_porytiles_path,
+            verify_porytiles,
+            compile_tileset,
             get_recent_projects
         ])
         .run(tauri::generate_context!())

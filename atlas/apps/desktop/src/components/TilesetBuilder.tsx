@@ -1,13 +1,16 @@
 import { useEffect, useState } from 'react';
 import { useProjectStore } from '../store/project';
-import { pickDirectory } from '../lib/api';
-import type { TilesetBudget } from '../lib/api';
+import { pickDirectory, pickFile, setPorytilesPath, verifyPorytiles } from '../lib/api';
+import type { BinaryStatus } from '../lib/api';
 import { BudgetMeter } from './BudgetMeter';
 
 // Center region when a Tileset is selected: the Builder. Shows the tileset's
-// members, live budget meters (palettes / tiles / metatiles), and Tier 2
-// problems in artist terms. Budgets recompute after any membership change,
-// debounced, off the UI thread (the Rust command is async).
+// members, live budget meters (palettes / tiles / metatiles), export, and the
+// M11 compile flow (target decomp project + Porytiles). Tier 2/3 problems now
+// render in the bottom Problems panel; the Builder holds the meters and the
+// actions. Budgets recompute after any membership change, debounced, off the
+// UI thread (the Rust command is async), and live in the store so the
+// Problems panel reads the same result.
 const RECOMPUTE_DELAY_MS = 250;
 
 export function TilesetBuilder() {
@@ -17,15 +20,20 @@ export function TilesetBuilder() {
       : null,
   );
   const objects = useProjectStore((s) => s.open?.project.objects ?? []);
+  const compileTarget = useProjectStore((s) => s.open?.project.compile_target ?? null);
   const renameTileset = useProjectStore((s) => s.renameTileset);
   const addMember = useProjectStore((s) => s.addTilesetMember);
   const removeMember = useProjectStore((s) => s.removeTilesetMember);
-  const computeBudget = useProjectStore((s) => s.computeTilesetBudget);
+  const refreshBudget = useProjectStore((s) => s.refreshTilesetBudget);
   const runExport = useProjectStore((s) => s.exportTileset);
+  const setCompileTarget = useProjectStore((s) => s.setCompileTarget);
+  const runCompile = useProjectStore((s) => s.compileTileset);
 
-  const [budget, setBudget] = useState<TilesetBudget | null>(null);
-  const [computing, setComputing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const budget = useProjectStore((s) => s.budget);
+  const computing = useProjectStore((s) => s.budgetComputing);
+  const budgetError = useProjectStore((s) => s.budgetError);
+  const compiling = useProjectStore((s) => s.compiling);
+  const compileResult = useProjectStore((s) => s.compileResult);
 
   // Export status. Not undoable and outside autosave: export writes outside
   // the project and never touches project data.
@@ -33,34 +41,30 @@ export function TilesetBuilder() {
   const [exportedPath, setExportedPath] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
 
+  // Porytiles binary readiness, checked once per Builder mount. Compile is
+  // disabled (with the status message) until the pinned version is found.
+  const [binary, setBinary] = useState<BinaryStatus | null>(null);
+  useEffect(() => {
+    let alive = true;
+    verifyPorytiles()
+      .then((s) => alive && setBinary(s))
+      .catch((e) => alive && setBinary({ ok: false, path: '', version: null, message: String(e) }));
+    return () => {
+      alive = false;
+    };
+  }, []);
+
   const tilesetId = tileset?.id ?? null;
   // A key that changes whenever membership changes, so budgets recompute.
   const membersKey = tileset?.members.join(',') ?? '';
 
   useEffect(() => {
     if (!tilesetId) return;
-    let alive = true;
-    setComputing(true);
     const timer = setTimeout(() => {
-      computeBudget(tilesetId)
-        .then((b) => {
-          if (alive) {
-            setBudget(b);
-            setError(null);
-          }
-        })
-        .catch((e) => {
-          if (alive) setError(String(e));
-        })
-        .finally(() => {
-          if (alive) setComputing(false);
-        });
+      void refreshBudget(tilesetId);
     }, RECOMPUTE_DELAY_MS);
-    return () => {
-      alive = false;
-      clearTimeout(timer);
-    };
-  }, [tilesetId, membersKey, computeBudget]);
+    return () => clearTimeout(timer);
+  }, [tilesetId, membersKey, refreshBudget]);
 
   // A stale success/error message would mislead once the tileset or its
   // membership changes, so export status resets with them.
@@ -74,9 +78,14 @@ export function TilesetBuilder() {
   const objectsById = new Map(objects.map((o) => [o.id, o]));
   const available = objects.filter((o) => !tileset.members.includes(o.id));
 
+  // Same gating for export and compile: any Tier 1/2 problem blocks both.
   const blocked = (budget?.problems.length ?? 0) > 0;
-  const exportDisabled =
-    exporting || computing || tileset.members.length === 0 || blocked;
+  const actionDisabled = computing || tileset.members.length === 0 || blocked;
+  const blockTitle = blocked
+    ? 'Fix the problems in the Problems panel first'
+    : tileset.members.length === 0
+      ? 'Add objects to the tileset first'
+      : undefined;
 
   const onExport = async () => {
     const dest = await pickDirectory('Choose where to export the tileset');
@@ -92,6 +101,20 @@ export function TilesetBuilder() {
     } finally {
       setExporting(false);
     }
+  };
+
+  const onPickTarget = async () => {
+    const dir = await pickDirectory('Choose the decomp project to compile into');
+    if (dir) setCompileTarget(dir);
+  };
+
+  // Point Porygon at a different Porytiles binary (persisted app-side, like
+  // recents), then re-verify so the readiness message updates immediately.
+  const onLocatePorytiles = async () => {
+    const path = await pickFile('Locate the porytiles binary');
+    if (!path) return;
+    await setPorytilesPath(path);
+    setBinary(await verifyPorytiles());
   };
 
   return (
@@ -138,34 +161,18 @@ export function TilesetBuilder() {
                   used={budget.metatiles.used}
                   total={budget.metatiles.total}
                 />
+                {blocked && (
+                  <p className="text-xs text-red-300">
+                    This tileset has problems - see the Problems panel below.
+                  </p>
+                )}
               </div>
-            ) : error ? (
-              <p className="text-sm text-red-400">{error}</p>
+            ) : budgetError ? (
+              <p className="text-sm text-red-400">{budgetError}</p>
             ) : (
               <p className="text-sm text-fg-subtle">Computing budgets…</p>
             )}
           </section>
-
-          {budget && budget.problems.length > 0 && (
-            <section className="space-y-2">
-              <h3 className="text-xs uppercase tracking-wide text-fg-muted">
-                Problems
-              </h3>
-              <ul className="space-y-1">
-                {budget.problems.map((p, i) => (
-                  <li
-                    key={i}
-                    className="rounded border border-red-500/40 bg-red-500/10 px-2 py-1.5 text-xs text-red-200"
-                  >
-                    <span className="mr-1 font-medium uppercase tracking-wide text-red-400/80">
-                      {p.tier}
-                    </span>
-                    {p.message}
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
 
           <section className="space-y-2">
             <div className="flex items-center justify-between">
@@ -216,6 +223,95 @@ export function TilesetBuilder() {
 
           <section className="space-y-2">
             <h3 className="text-xs uppercase tracking-wide text-fg-muted">
+              Compile (Porytiles)
+            </h3>
+            <p className="text-xs text-fg-subtle">
+              Compiles this tileset into a decomp project with Porytiles and
+              adds a Porymap prefab per object. Point it at a scratch copy of
+              your project, never at a pristine checkout.
+            </p>
+
+            {binary && !binary.ok && (
+              <div className="space-y-1 rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1.5 text-xs text-amber-200">
+                <p>{binary.message}</p>
+                <button
+                  type="button"
+                  onClick={() => void onLocatePorytiles()}
+                  className="underline hover:text-amber-100"
+                >
+                  Locate Porytiles…
+                </button>
+              </div>
+            )}
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => void onPickTarget()}
+                className="rounded border border-bg-border bg-bg-input px-3 py-1 text-sm text-fg hover:border-accent"
+              >
+                {compileTarget ? 'Change target…' : 'Choose target project…'}
+              </button>
+              {compileTarget && (
+                <span className="min-w-0 flex-1 truncate font-mono text-xs text-fg-subtle" title={compileTarget}>
+                  {compileTarget}
+                </span>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                disabled={
+                  actionDisabled || compiling || !compileTarget || !(binary?.ok ?? false)
+                }
+                onClick={() => void runCompile(tileset.id)}
+                title={
+                  blockTitle ??
+                  (!compileTarget
+                    ? 'Choose a target decomp project first'
+                    : !(binary?.ok ?? false)
+                      ? binary?.message
+                      : undefined)
+                }
+                className="rounded bg-accent px-3 py-1 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {compiling ? 'Compiling...' : 'Compile tileset'}
+              </button>
+              {blocked && (
+                <span className="text-xs text-fg-subtle">
+                  Fix the problems below to enable compiling.
+                </span>
+              )}
+            </div>
+
+            {compileResult?.success && (
+              <div className="space-y-1 rounded border border-green-500/40 bg-green-500/10 px-2 py-1.5 text-xs text-green-200">
+                <p>
+                  Compiled {compileResult.secondary_symbol} (paired with{' '}
+                  {compileResult.primary_symbol}).
+                </p>
+                {compileResult.tileset_bin_dir && (
+                  <p className="break-all">Tileset written to {compileResult.tileset_bin_dir}</p>
+                )}
+                {compileResult.prefabs && (
+                  <p className="break-all">
+                    {compileResult.prefabs.written} prefab
+                    {compileResult.prefabs.written === 1 ? '' : 's'} written to{' '}
+                    {compileResult.prefabs.prefabs_path}
+                  </p>
+                )}
+              </div>
+            )}
+            {compileResult && !compileResult.success && (
+              <p className="text-xs text-fg-subtle">
+                The compile was rejected - see the Problems panel below.
+              </p>
+            )}
+          </section>
+
+          <section className="space-y-2">
+            <h3 className="text-xs uppercase tracking-wide text-fg-muted">
               Export
             </h3>
             <p className="text-xs text-fg-subtle">
@@ -225,24 +321,13 @@ export function TilesetBuilder() {
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                disabled={exportDisabled}
+                disabled={actionDisabled || exporting}
                 onClick={onExport}
-                title={
-                  blocked
-                    ? 'Fix the problems above first'
-                    : tileset.members.length === 0
-                      ? 'Add objects to the tileset first'
-                      : undefined
-                }
+                title={blockTitle}
                 className="rounded border border-bg-border bg-bg-input px-3 py-1 text-sm text-fg hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {exporting ? 'Exporting...' : 'Export tileset'}
               </button>
-              {blocked && (
-                <span className="text-xs text-fg-subtle">
-                  Fix the problems above to enable export.
-                </span>
-              )}
             </div>
             {exportedPath && (
               <p className="break-all rounded border border-green-500/40 bg-green-500/10 px-2 py-1.5 text-xs text-green-200">

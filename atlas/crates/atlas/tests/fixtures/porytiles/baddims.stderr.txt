@@ -1,0 +1,46 @@
+remark [base-game-detection]:
+│
+│ Detected base game 'pokeemerald-expansion'.
+│
+note [base-game-detection]:
+│
+│ Found both METATILE_ATTRIBUTE_BEHAVIOR and METATILE_ATTR_BEHAVIOR_MASK in '<project>/include/global.fieldmap.h'.
+│
+remark [resolve-partner-primary]:
+│
+│ Resolved partner primary 'gTileset_AtlasBase' for secondary 'gTileset_AtlasSpike'.
+│
+note [resolve-partner-primary]:
+│
+│ 'Primary Pairing Mode' is 'manual' due to configuration:
+│ 
+│ --primary-pairing-mode = manual
+│ Source: CLI
+│ 
+│ --------
+│ 
+│ 'Primary Pairing Partners' is '["gTileset_AtlasBase"]' due to configuration:
+│ 
+│ --primary-pairing-partners = ["gTileset_AtlasBase"]
+│ Source: CLI
+│
+fatal:
+│
+│ Failed to compile tileset 'gTileset_AtlasSpike'.
+│
+├ caused by:
+│ 
+│ Compilation job failed for 'gTileset_AtlasSpike'.
+│
+├ caused by:
+│ 
+│ failed to metatileize input layer images for gTileset_AtlasSpike
+│
+├ caused by:
+│ 
+│ Failed to tileize bottom layer.
+│
+├ root cause:
+│ 
+│ image dimensions must be a multiple of 8, got 30x48
+│

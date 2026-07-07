@@ -48,6 +48,11 @@ pub struct Project {
     /// to empty on load.
     #[serde(default)]
     pub tilesets: Vec<Tileset>,
+    /// Target decomp project directory for Porytiles compilation (M11),
+    /// persisted so re-compiles are one click. Absent in pre-M11 files; defaults
+    /// to `None` (additive, so no format_version bump - same story as tilesets).
+    #[serde(default)]
+    pub compile_target: Option<String>,
 }
 
 impl Project {
@@ -60,6 +65,7 @@ impl Project {
             modified: now,
             objects: Vec::new(),
             tilesets: Vec::new(),
+            compile_target: None,
         }
     }
 }
@@ -238,6 +244,15 @@ mod tests {
             "objects":[{"id":"a","name":"Tree","width":32,"height":48,"anchor":{"x":16,"y":48}}]}"#;
         let project = parse(json).unwrap();
         assert!(project.tilesets.is_empty());
+        assert_eq!(project.format_version, FORMAT_VERSION);
+    }
+
+    #[test]
+    fn parse_pre_m11_file_defaults_empty_compile_target() {
+        // A v2 manifest written before M11 has no `compile_target` field.
+        let json = r#"{"format_version":2,"name":"P","created":1,"modified":2,"tilesets":[]}"#;
+        let project = parse(json).unwrap();
+        assert!(project.compile_target.is_none());
         assert_eq!(project.format_version, FORMAT_VERSION);
     }
 

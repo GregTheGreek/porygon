@@ -1,0 +1,43 @@
+remark [base-game-detection]:
+│
+│ Detected base game 'pokeemerald-expansion'.
+│
+note [base-game-detection]:
+│
+│ Found both METATILE_ATTRIBUTE_BEHAVIOR and METATILE_ATTR_BEHAVIOR_MASK in '<project>/include/global.fieldmap.h'.
+│
+remark [resolve-partner-primary]:
+│
+│ Resolved partner primary 'gTileset_AtlasBase' for secondary 'gTileset_AtlasSpike'.
+│
+note [resolve-partner-primary]:
+│
+│ 'Primary Pairing Mode' is 'manual' due to configuration:
+│ 
+│ --primary-pairing-mode = manual
+│ Source: CLI
+│ 
+│ --------
+│ 
+│ 'Primary Pairing Partners' is '["gTileset_AtlasBase"]' due to configuration:
+│ 
+│ --primary-pairing-partners = ["gTileset_AtlasBase"]
+│ Source: CLI
+│
+---------------------------------
+|             PANIC             |
+---------------------------------
+tileset_compiler.cpp:1228: color_index_map.size() > count_limit - this should have already been validated by pipeline_step_validate_input
+
+Stack trace (most recent call first):
+#0  [34m0x000000010023bd5b[0m in [33m(anonymous namespace)::CompilerTask::pipeline_helper_run_pal_packing()[0m at [32m<porytiles>[0m
+#1  [34m0x0000000100207327[0m in [33m(anonymous namespace)::CompilerTask::pipeline_step_setup_working_data()[0m at [32m<porytiles>[0m
+#2  [34m0x00000001001fd133[0m in [33m(anonymous namespace)::CompilerTask::run()[0m at [32m<porytiles>[0m
+#3  [34m0x00000001001fc5db[0m in [33mporytiles::TilesetCompiler::compile(porytiles::Tileset const&, bool, porytiles::Tileset const*) const[0m at [32m<porytiles>[0m
+#4  [34m0x000000010015de1b[0m in [33mporytiles::CompileSecondaryTileset::compile(std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char>> const&) const[0m at [32m<porytiles>[0m
+#5  [34m0x0000000100135f0b[0m in [33mCompileTilesetCommand::Run()[0m at [32m<porytiles>[0m
+#6  [34m0x0000000100145b4b[0m in [33mCLI::App::run_callback(bool, bool)[0m at [32m<porytiles>[0m
+#7  [34m0x00000001001453a7[0m in [33mCLI::App::parse(std::__1::vector<std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char>>, std::__1::allocator<std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char>>>>&&)[0m at [32m<porytiles>[0m
+#8  [34m0x000000010014524b[0m in [33mvoid CLI::App::parse_char_t<char>(int, char const* const*)[0m at [32m<porytiles>[0m
+#9  [34m0x00000001000f5de7[0m in [33m_main[0m at [32m<porytiles>[0m
+#10 [34m0x0000000180666b97[0m at [32m/usr/lib/dyld[0m

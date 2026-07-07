@@ -16,11 +16,14 @@ use crate::occlusion::pixel_count;
 
 /// Which validity tier a problem belongs to. `Object` (Tier 1) is authoring-time
 /// and fixed on the Canvas; `Tileset` (Tier 2, M9) is compile-time and fixed in
-/// the Tileset view; `Export` (Tier 3) arrives with Milestone 11.
+/// the Tileset view; `Export` (Tier 3, M11) is round-trip-time - a Porytiles
+/// outcome mapped back to artist terms (bible: raw compiler output never reaches
+/// the artist).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum Tier {
     Object,
     Tileset,
+    Export,
 }
 
 /// A single validity problem, in artist terms. Never engine/compiler jargon.

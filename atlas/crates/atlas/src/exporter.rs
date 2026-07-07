@@ -72,9 +72,9 @@
 
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::budgets::{self, LoadedMember, MemberArt};
 use crate::collision::{grid_dims, CollisionValue};
@@ -85,7 +85,7 @@ use crate::pokemon_emerald::{self, METATILE_PX};
 const SHEET_MAX_WIDTH_CELLS: u32 = 8;
 /// First global metatile id of a secondary tileset (compiler.md "Compiled
 /// Objects and Prefabs": secondary IDs start at 512).
-const SECONDARY_METATILE_BASE: u32 = 512;
+pub(crate) const SECONDARY_METATILE_BASE: u32 = 512;
 /// Schema version stamped into every .atlasobject.
 const ATLASOBJECT_VERSION: u32 = 1;
 /// The Porytiles source subdirectory name (compiler.md "Target").
@@ -99,33 +99,34 @@ pub struct ExportResult {
 
 /// One cell of a Compiled Object. Field declaration order is alphabetical so
 /// the serialized JSON has sorted keys.
-#[derive(Serialize)]
-struct CompiledCell {
+#[derive(Serialize, Deserialize, Clone)]
+pub(crate) struct CompiledCell {
     /// MB_* behavior emitted for this cell, or null (Walkable/Blocked).
     behavior: Option<String>,
     /// The authored collision value (serde shape shared with project.json).
-    collision: CollisionValue,
+    pub(crate) collision: CollisionValue,
     /// Global metatile id (secondary base 512 + row-major sheet index).
-    metatile_id: u32,
+    pub(crate) metatile_id: u32,
     /// Cell column within the object's own 16px grid.
-    x: u32,
+    pub(crate) x: u32,
     /// Cell row within the object's own 16px grid.
-    y: u32,
+    pub(crate) y: u32,
 }
 
 /// A Compiled Object (.atlasobject): the mapping from one Object to the
-/// emitted metatiles. Fields alphabetical for sorted-key JSON.
-#[derive(Serialize)]
-struct CompiledObject {
+/// emitted metatiles. Fields alphabetical for sorted-key JSON. Also the input
+/// to prefab emission (M11), so its fields are crate-visible.
+#[derive(Serialize, Deserialize, Clone)]
+pub(crate) struct CompiledObject {
     anchor: Anchor,
     /// Cells row-major over the object's grid; ids are global and contiguous.
-    cells: Vec<CompiledCell>,
-    cols: u32,
+    pub(crate) cells: Vec<CompiledCell>,
+    pub(crate) cols: u32,
     format_version: u32,
     height: u32,
     id: String,
-    name: String,
-    rows: u32,
+    pub(crate) name: String,
+    pub(crate) rows: u32,
     /// The tileset this object was compiled into (name, for humans).
     tileset: String,
     width: u32,
@@ -133,11 +134,11 @@ struct CompiledObject {
 
 /// Everything an export writes, composed fully in memory before any fs work so
 /// a failure can never leave partial output.
-struct Bundle {
-    bottom_png: Vec<u8>,
-    middle_png: Vec<u8>,
-    top_png: Vec<u8>,
-    attributes_csv: String,
+pub(crate) struct Bundle {
+    pub(crate) bottom_png: Vec<u8>,
+    pub(crate) middle_png: Vec<u8>,
+    pub(crate) top_png: Vec<u8>,
+    pub(crate) attributes_csv: String,
     /// (file name, pretty JSON) per member object, in member order.
     objects: Vec<(String, String)>,
 }
@@ -151,7 +152,7 @@ pub fn export_tileset(
 ) -> Result<ExportResult, String> {
     let (tileset, members) = budgets::load_members(project_dir, tileset_id)?;
     gate(&members)?;
-    let bundle = compose(&tileset.name, &members)?;
+    let (bundle, _compiled) = compose(&tileset.name, &members)?;
 
     let dest = Path::new(dest_dir);
     if !dest.is_dir() {
@@ -191,7 +192,7 @@ fn fs_err(what: &str, e: &std::io::Error) -> String {
 /// blocker in artist terms. Tier 1 problems are prefixed with the object's
 /// name; Tier 2 problems come straight from the budget prediction (the same
 /// messages the Problems panel shows).
-fn gate(members: &[LoadedMember]) -> Result<(), String> {
+pub(crate) fn gate(members: &[LoadedMember]) -> Result<(), String> {
     let mut blockers: Vec<String> = Vec::new();
 
     if members.is_empty() {
@@ -256,7 +257,10 @@ struct CellRef {
 
 /// Compose the full export in memory. Pure apart from reading the engine
 /// vocabulary; deterministic by construction.
-fn compose(tileset_name: &str, members: &[LoadedMember]) -> Result<Bundle, String> {
+pub(crate) fn compose(
+    tileset_name: &str,
+    members: &[LoadedMember],
+) -> Result<(Bundle, Vec<CompiledObject>), String> {
     // Flat cell sequence: members in authoring order, cells row-major each.
     let mut cells: Vec<CellRef> = Vec::new();
     for (mi, m) in members.iter().enumerate() {
@@ -357,6 +361,7 @@ fn compose(tileset_name: &str, members: &[LoadedMember]) -> Result<Bundle, Strin
     }
 
     let mut objects = Vec::with_capacity(members.len());
+    let mut compiled_objects = Vec::with_capacity(members.len());
     let mut used_names: Vec<String> = Vec::new();
     for (m, obj_cells) in members.iter().zip(compiled) {
         let (cols, rows) = grid_dims(m.art.width, m.art.height);
@@ -377,15 +382,19 @@ fn compose(tileset_name: &str, members: &[LoadedMember]) -> Result<Bundle, Strin
         let json = serde_json::to_string_pretty(&compiled_object)
             .map_err(|e| format!("Could not encode \"{}\": {e}", m.object.name))?;
         objects.push((format!("{name}.atlasobject"), json + "\n"));
+        compiled_objects.push(compiled_object);
     }
 
-    Ok(Bundle {
-        bottom_png: encode_png(width, height, &bottom)?,
-        middle_png: encode_png(width, height, &middle)?,
-        top_png: encode_png(width, height, &top)?,
-        attributes_csv: csv,
-        objects,
-    })
+    Ok((
+        Bundle {
+            bottom_png: encode_png(width, height, &bottom)?,
+            middle_png: encode_png(width, height, &middle)?,
+            top_png: encode_png(width, height, &top)?,
+            attributes_csv: csv,
+            objects,
+        },
+        compiled_objects,
+    ))
 }
 
 /// Encode RGBA pixels to PNG bytes with every setting pinned (RGBA 8-bit,
@@ -433,7 +442,7 @@ fn write_bundle(dir: &Path, bundle: &Bundle) -> Result<(), String> {
 /// Lowercase a free-text name into a filesystem-safe snake_case slug
 /// (compiler.md's slug convention covers gTileset_* symbols; free-text names
 /// get the same shape: lowercase alphanumerics joined by single underscores).
-fn slugify(name: &str, fallback: &str) -> String {
+pub(crate) fn slugify(name: &str, fallback: &str) -> String {
     let mut out = String::new();
     let mut pending_sep = false;
     for ch in name.chars() {
@@ -452,6 +461,40 @@ fn slugify(name: &str, fallback: &str) -> String {
     } else {
         out
     }
+}
+
+/// A free-text tileset name to its Porytiles `gTileset_*` symbol: the slug's
+/// words CamelCased and prefixed (compiler.md "Symbol-to-slug" run in reverse -
+/// `slug` strips `gTileset_` and snake-cases, so this is the inverse and stays
+/// consistent with `slugify`: `slugify(symbolize(n)-minus-prefix) == slugify(n)`).
+/// Falls back to `Tileset` so an all-punctuation name still yields a valid C
+/// identifier.
+pub(crate) fn symbolize(name: &str) -> String {
+    let slug = slugify(name, "tileset");
+    let mut camel = String::new();
+    for word in slug.split('_') {
+        let mut chars = word.chars();
+        if let Some(first) = chars.next() {
+            camel.push(first.to_ascii_uppercase());
+            camel.extend(chars);
+        }
+    }
+    format!("gTileset_{camel}")
+}
+
+/// Write only the Porytiles source assets (the four layer/attribute files) into
+/// an existing `porytiles_src` directory - the M11 compile path writes them
+/// straight into the managed tileset rather than into a fresh export tree.
+pub(crate) fn write_source_layers(src_dir: &Path, bundle: &Bundle) -> Result<(), String> {
+    fs::create_dir_all(src_dir).map_err(|e| fs_err("create the tileset source folder", &e))?;
+    let write = |path: PathBuf, data: &[u8]| -> Result<(), String> {
+        fs::write(path, data).map_err(|e| fs_err("write a tileset source file", &e))
+    };
+    write(src_dir.join("bottom.png"), &bundle.bottom_png)?;
+    write(src_dir.join("middle.png"), &bundle.middle_png)?;
+    write(src_dir.join("top.png"), &bundle.top_png)?;
+    write(src_dir.join("attributes.csv"), bundle.attributes_csv.as_bytes())?;
+    Ok(())
 }
 
 /// Deduplicate a slug against names already taken, deterministically:
@@ -838,5 +881,34 @@ mod tests {
         assert_eq!(slugify("  My--Cool  Set!! ", "tileset"), "my_cool_set");
         assert_eq!(slugify("!!!", "tileset"), "tileset");
         assert_eq!(slugify("Tileset 1", "tileset"), "tileset_1");
+    }
+
+    #[test]
+    fn symbolize_camel_cases_the_slug_words() {
+        // Porytiles derives the on-disk slug from the symbol by snake-casing the
+        // CamelCase (gTileset_ForestSet -> forest_set), which must match the slug
+        // the exporter computes with `slugify` from the same name. Both derive
+        // from the name, so they agree by construction; these anchor the shape.
+        assert_eq!(symbolize("Forest Set"), "gTileset_ForestSet");
+        assert_eq!(symbolize("atlas spike"), "gTileset_AtlasSpike");
+        assert_eq!(symbolize("!!!"), "gTileset_Tileset");
+    }
+
+    #[test]
+    fn compose_returns_one_compiled_object_per_member() {
+        let members = {
+            let (project, tileset_id) = project_with(vec![
+                solid_object("Tree", 16, 16, [1, 2, 3], false),
+                solid_object("Rock", 32, 16, [4, 5, 6], false),
+            ]);
+            budgets::load_members(project.to_str().unwrap(), &tileset_id).unwrap().1
+        };
+        let (_, compiled) = compose("Set", &members).unwrap();
+        assert_eq!(compiled.len(), 2);
+        assert_eq!(compiled[0].name, "Tree");
+        assert_eq!(compiled[0].cells[0].metatile_id, SECONDARY_METATILE_BASE);
+        // Rock's first cell follows Tree's single cell.
+        assert_eq!(compiled[1].cells[0].metatile_id, SECONDARY_METATILE_BASE + 1);
+        assert_eq!(compiled[1].cols, 2);
     }
 }

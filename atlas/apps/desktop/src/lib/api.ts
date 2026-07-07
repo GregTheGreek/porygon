@@ -48,10 +48,10 @@ export type CollisionTag = {
 };
 
 // A validity problem, in artist terms. `tier` is the validity tier it belongs
-// to: 'Object' (Tier 1, authoring) or 'Tileset' (Tier 2, budgets). Mirrors
-// validity.rs.
+// to: 'Object' (Tier 1, authoring), 'Tileset' (Tier 2, budgets), or 'Export'
+// (Tier 3, a mapped Porytiles outcome). Mirrors validity.rs.
 export type Problem = {
-  tier: 'Object' | 'Tileset';
+  tier: 'Object' | 'Tileset' | 'Export';
   message: string;
 };
 
@@ -83,6 +83,35 @@ export type TilesetBudget = {
 // Mirrors ExportResult in crates/atlas/src/exporter.rs.
 export type ExportResult = { path: string };
 
+// App-level settings. Mirrors settings.rs. `porytiles_path` null = use default.
+export type Settings = { porytiles_path: string | null };
+
+// Result of checking the Porytiles binary. Mirrors porytiles.rs BinaryStatus.
+export type BinaryStatus = {
+  ok: boolean;
+  path: string;
+  version: string | null;
+  message: string;
+};
+
+// Where prefabs were written and how many. Mirrors prefabs.rs PrefabResult.
+export type PrefabResult = { prefabs_path: string; written: number };
+
+// Outcome of a Porytiles compile. Mirrors porytiles.rs CompileResult. On
+// success `problems` is empty and the written paths are populated; on a
+// toolchain failure `problems` holds the Tier 3 diagnostics and `details`
+// carries the raw compiler report (shown only in an expander, never as the
+// primary message).
+export type CompileResult = {
+  success: boolean;
+  primary_symbol: string;
+  secondary_symbol: string;
+  tileset_bin_dir: string | null;
+  prefabs: PrefabResult | null;
+  problems: Problem[];
+  details: string | null;
+};
+
 // Mirrors the serde structs in crates/atlas/src/project.rs. Rust owns the
 // schema; these types just describe what crosses the IPC boundary.
 export type Project = {
@@ -92,6 +121,9 @@ export type Project = {
   modified: number;
   objects: AtlasObject[];
   tilesets: Tileset[];
+  // Target decomp project directory for Porytiles compilation (M11), persisted
+  // so re-compiles are one click. null until the artist picks one.
+  compile_target: string | null;
 };
 
 export type OpenProject = {
@@ -148,6 +180,13 @@ export async function getRecentProjects(): Promise<Recent[]> {
 /// Native directory picker. Returns null if the user cancels.
 export async function pickDirectory(title: string): Promise<string | null> {
   const result = await openDialog({ directory: true, multiple: false, title });
+  return typeof result === 'string' ? result : null;
+}
+
+/// Native file picker (no extension filter), for choosing an executable such
+/// as the Porytiles binary. Returns null if the user cancels.
+export async function pickFile(title: string): Promise<string | null> {
+  const result = await openDialog({ directory: false, multiple: false, title });
   return typeof result === 'string' ? result : null;
 }
 
@@ -236,4 +275,32 @@ export async function exportTileset(
   destDir: string,
 ): Promise<ExportResult> {
   return invoke<ExportResult>('export_tileset', { projectPath, tilesetId, destDir });
+}
+
+/// The persisted app settings (currently just the Porytiles binary path).
+export async function getSettings(): Promise<Settings> {
+  return invoke<Settings>('get_settings');
+}
+
+/// Override the Porytiles binary path (pass null to clear back to default).
+export async function setPorytilesPath(path: string | null): Promise<Settings> {
+  return invoke<Settings>('set_porytiles_path', { path });
+}
+
+/// Check the configured Porytiles binary: present and exactly the pinned
+/// version? Drives the compile-readiness UI. Never throws for a bad binary.
+export async function verifyPorytiles(): Promise<BinaryStatus> {
+  return invoke<BinaryStatus>('verify_porytiles');
+}
+
+/// Compile a tileset with Porytiles into the target decomp project (M11):
+/// export -> create/compile -> prefabs. Returns success with written paths or a
+/// mapped Tier 3 problem. Throws only for pre-flight failures (bad binary,
+/// Tier 1/2 gate, filesystem). The caller persists the project first.
+export async function compileTileset(
+  projectPath: string,
+  tilesetId: string,
+  decompDir: string,
+): Promise<CompileResult> {
+  return invoke<CompileResult>('compile_tileset', { projectPath, tilesetId, decompDir });
 }

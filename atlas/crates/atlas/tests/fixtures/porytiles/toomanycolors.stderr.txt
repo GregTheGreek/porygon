@@ -1,0 +1,82 @@
+remark [base-game-detection]:
+│
+│ Detected base game 'pokeemerald-expansion'.
+│
+note [base-game-detection]:
+│
+│ Found both METATILE_ATTRIBUTE_BEHAVIOR and METATILE_ATTR_BEHAVIOR_MASK in '<project>/include/global.fieldmap.h'.
+│
+remark [resolve-partner-primary]:
+│
+│ Resolved partner primary 'gTileset_AtlasBase' for secondary 'gTileset_AtlasSpike'.
+│
+note [resolve-partner-primary]:
+│
+│ 'Primary Pairing Mode' is 'manual' due to configuration:
+│ 
+│ --primary-pairing-mode = manual
+│ Source: CLI
+│ 
+│ --------
+│ 
+│ 'Primary Pairing Partners' is '["gTileset_AtlasBase"]' due to configuration:
+│ 
+│ --primary-pairing-partners = ["gTileset_AtlasBase"]
+│ Source: CLI
+│
+error [tile-color-count-violation]:
+│
+│ metatile 0x0(0)|top|northwest(0)|1,7: found 16th unique tile color: 155 53 207
+│ 
+│ ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
+│                                  
+│               XX                 
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│ 
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│                                  
+│ 
+│
+note [tile-color-count-violation]:
+│
+│ color counts:
+│ 5 3 7 ➞ 1 pixel(s)
+│ 15 23 37 ➞ 1 pixel(s)
+│ 25 43 67 ➞ 1 pixel(s)
+│ 35 63 97 ➞ 1 pixel(s)
+│ 45 83 127 ➞ 1 pixel(s)
+│ 55 103 157 ➞ 1 pixel(s)
+│ 65 123 187 ➞ 1 pixel(s)
+│ 75 143 217 ➞ 1 pixel(s)
+│ 85 163 247 ➞ 1 pixel(s)
+│ 95 183 27 ➞ 1 pixel(s)
+│ 105 203 57 ➞ 1 pixel(s)
+│ 115 223 87 ➞ 1 pixel(s)
+│ 125 243 117 ➞ 1 pixel(s)
+│ 135 13 147 ➞ 1 pixel(s)
+│ 145 33 177 ➞ 1 pixel(s)
+│ 155 53 207 ➞ 1 pixel(s)
+│
+fatal:
+│
+│ Failed to compile tileset 'gTileset_AtlasSpike'.
+│
+├ caused by:
+│ 
+│ Compilation job failed for 'gTileset_AtlasSpike'.
+│
+├ root cause:
+│ 
+│ Found tile(s) with more than 15 unique non-transparent pixels.
+│
