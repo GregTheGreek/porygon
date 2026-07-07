@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { Panel } from './Panel';
 import { Canvas } from './Canvas';
+import { ObjectLibrary } from './ObjectLibrary';
 import { ResizeHandle } from './ResizeHandle';
-import { useCanvasStore } from '../store/canvas';
+import { useProjectStore } from '../store/project';
 
 const clamp = (value: number, min: number, max: number) =>
   Math.min(Math.max(value, min), max);
@@ -20,7 +21,7 @@ export function Workspace() {
       <div className="flex min-h-0 flex-1">
         <div style={{ width: leftWidth }} className="shrink-0">
           <Panel title="Object Library" className="h-full">
-            No objects yet. Import artwork to create one.
+            <ObjectLibrary />
           </Panel>
         </div>
         <ResizeHandle
@@ -66,28 +67,39 @@ export function Workspace() {
   );
 }
 
-// M3 placeholder Inspector: when the imported artwork is selected on the
-// Canvas, show its filename and dimensions. Real Objects arrive in M4.
+// Inspector: read-only view of the selected Object. Editing (name, category,
+// tags, anchor) arrives with the M5 Inspector milestone.
 function Inspector() {
-  const artwork = useCanvasStore((s) => s.artwork);
-  const selected = useCanvasStore((s) => s.selected);
+  const object = useProjectStore((s) =>
+    s.open && s.selectedObjectId
+      ? s.open.project.objects.find((o) => o.id === s.selectedObjectId) ?? null
+      : null,
+  );
 
-  if (!artwork || !selected) {
-    return <>No selection. Select artwork on the canvas to inspect it.</>;
+  if (!object) {
+    return <>No selection. Select an object in the library to inspect it.</>;
   }
 
   return (
     <div className="space-y-3">
       <div>
-        <div className="text-xs uppercase tracking-wide text-fg-muted">Artwork</div>
-        <div className="mt-1 truncate text-sm text-fg" title={artwork.name}>
-          {artwork.name}
+        <div className="text-xs uppercase tracking-wide text-fg-muted">Name</div>
+        <div className="mt-1 truncate text-sm text-fg" title={object.name}>
+          {object.name}
         </div>
       </div>
       <div>
         <div className="text-xs uppercase tracking-wide text-fg-muted">Dimensions</div>
         <div className="mt-1 font-mono text-sm text-fg">
-          {artwork.width} × {artwork.height} px
+          {object.width} × {object.height} px
+        </div>
+      </div>
+      <div>
+        <div className="text-xs uppercase tracking-wide text-fg-muted">
+          Anchor (16px grid)
+        </div>
+        <div className="mt-1 font-mono text-sm text-fg">
+          {object.anchor.x}, {object.anchor.y}
         </div>
       </div>
     </div>

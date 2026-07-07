@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { CanvasEngine } from '../canvas/CanvasEngine';
 import { useCanvasStore } from '../store/canvas';
+import { useProjectStore } from '../store/project';
 
 // The center region. React only mounts the Pixi world and plumbs props; all
 // rendering, zoom, pan, grid, and selection live in CanvasEngine.
@@ -9,10 +10,11 @@ export function Canvas() {
   const engineRef = useRef<CanvasEngine | null>(null);
 
   const artwork = useCanvasStore((s) => s.artwork);
-  const error = useCanvasStore((s) => s.error);
-  const importing = useCanvasStore((s) => s.importing);
   const setSelected = useCanvasStore((s) => s.setSelected);
-  const importArtwork = useCanvasStore((s) => s.importArtwork);
+  const error = useProjectStore((s) => s.error);
+  const importing = useProjectStore((s) => s.importing);
+  const importObject = useProjectStore((s) => s.importObject);
+  const hasObjects = useProjectStore((s) => (s.open?.project.objects.length ?? 0) > 0);
 
   const [zoom, setZoom] = useState(100);
   const [show8, setShow8] = useState(false);
@@ -107,12 +109,20 @@ export function Canvas() {
       <div className="relative min-h-0 flex-1 overflow-hidden">
         <div ref={mountRef} className="absolute inset-0" />
 
-        {!hasArtwork && (
+        {!hasArtwork && hasObjects && (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+            <p className="text-sm text-fg-subtle">
+              Select an object in the library to view it.
+            </p>
+          </div>
+        )}
+
+        {!hasArtwork && !hasObjects && (
           <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3">
             <p className="text-sm text-fg-subtle">Import artwork to begin.</p>
             <button
               type="button"
-              onClick={() => void importArtwork()}
+              onClick={() => void importObject()}
               disabled={importing}
               className="pointer-events-auto rounded bg-accent px-3 py-1.5 text-sm font-medium text-white disabled:opacity-40"
             >

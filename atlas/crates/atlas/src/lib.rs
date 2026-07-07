@@ -1,6 +1,7 @@
 // Tauri 2 entry point for the Porygon desktop shell.
 
 mod artwork;
+mod object;
 mod project;
 mod recents;
 
@@ -9,6 +10,7 @@ use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
 
 use artwork::Artwork;
+use object::Object;
 use project::{OpenProject, Project};
 use recents::Recent;
 
@@ -70,6 +72,39 @@ fn read_artwork(path: String) -> Result<Artwork, String> {
     artwork::read(&path).map_err(|e| e.to_string())
 }
 
+/// Import a PNG as a new Object: copy it into `objects/<uuid>/artwork.png` and
+/// return the Object metadata. The frontend adds it to project.json and saves.
+#[tauri::command]
+fn import_object(project_path: String, source_png: String, name: String) -> Result<Object, String> {
+    object::import(&project_path, &source_png, &name).map_err(|e| e.to_string())
+}
+
+/// Duplicate an existing Object's artwork into a fresh directory, returning the
+/// new Object (new UUID, "<name> copy"). The frontend has the source metadata.
+#[tauri::command]
+fn duplicate_object(project_path: String, source: Object) -> Result<Object, String> {
+    object::duplicate(&project_path, &source).map_err(|e| e.to_string())
+}
+
+/// Soft-delete an Object: move its directory to `.trash/<uuid>` so undo can
+/// restore it. The frontend removes it from project.json.
+#[tauri::command]
+fn trash_object(project_path: String, id: String) -> Result<(), String> {
+    object::trash(&project_path, &id).map_err(|e| e.to_string())
+}
+
+/// Undo a soft-delete: move the object's directory back out of `.trash`.
+#[tauri::command]
+fn restore_object(project_path: String, id: String) -> Result<(), String> {
+    object::restore(&project_path, &id).map_err(|e| e.to_string())
+}
+
+/// Read an Object's stored artwork (base64 + dimensions) for the Canvas.
+#[tauri::command]
+fn read_object_artwork(project_path: String, id: String) -> Result<Artwork, String> {
+    object::read_artwork(&project_path, &id).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn get_recent_projects(app: AppHandle) -> Result<Vec<Recent>, String> {
     let file = recents_file(&app)?;
@@ -88,6 +123,11 @@ pub fn run() {
             open_project,
             save_project,
             read_artwork,
+            import_object,
+            duplicate_object,
+            trash_object,
+            restore_object,
+            read_object_artwork,
             get_recent_projects
         ])
         .run(tauri::generate_context!())

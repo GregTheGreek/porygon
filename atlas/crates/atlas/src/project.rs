@@ -11,15 +11,23 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
+use crate::object::Object;
+
 /// Current on-disk schema version. Bump only alongside a migration path.
-pub const FORMAT_VERSION: u32 = 1;
+///
+/// v1: name/created/modified only.
+/// v2: adds `objects` (Milestone 4). v1 files migrate forward on load: the
+/// missing `objects` field defaults to empty and the version is stamped to
+/// current (see `parse`).
+pub const FORMAT_VERSION: u32 = 2;
 
 /// Name of the manifest inside a project directory.
 pub const PROJECT_FILE: &str = "project.json";
 
-/// The project manifest. Deliberately minimal: Objects (M4) and Tilesets (M9)
-/// arrive later and get their own fields then. `format_version` is the one
-/// future-proofing field that earns its place today.
+/// The project manifest. Objects are embedded here (rather than one JSON per
+/// object directory) so the whole project state persists in a single write via
+/// `save`, keeping autosave atomic-ish. Only object *metadata* lives here; the
+/// artwork pixels live on disk under `objects/<uuid>/` (see object.rs).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Project {
     pub format_version: u32,
@@ -28,6 +36,9 @@ pub struct Project {
     pub created: u64,
     /// Last-modified time, Unix milliseconds.
     pub modified: u64,
+    /// Reusable Objects (M4). Absent in v1 files; defaults to empty on load.
+    #[serde(default)]
+    pub objects: Vec<Object>,
 }
 
 impl Project {
@@ -38,6 +49,7 @@ impl Project {
             name: name.to_string(),
             created: now,
             modified: now,
+            objects: Vec::new(),
         }
     }
 }
@@ -86,9 +98,12 @@ fn now_millis() -> u64 {
         .unwrap_or(0)
 }
 
-/// Parse a manifest, rejecting anything written by a newer schema version.
+/// Parse a manifest, rejecting anything written by a newer schema version and
+/// migrating older ones forward. Migration today is defaulting-only (v1 gains an
+/// empty `objects` via `#[serde(default)]`); we stamp the version to current so
+/// the next save writes the new schema.
 pub fn parse(json: &str) -> Result<Project, ProjectError> {
-    let project: Project =
+    let mut project: Project =
         serde_json::from_str(json).map_err(|e| ProjectError::Parse(e.to_string()))?;
     if project.format_version > FORMAT_VERSION {
         return Err(ProjectError::UnsupportedVersion {
@@ -96,6 +111,7 @@ pub fn parse(json: &str) -> Result<Project, ProjectError> {
             supported: FORMAT_VERSION,
         });
     }
+    project.format_version = FORMAT_VERSION;
     Ok(project)
 }
 
@@ -147,8 +163,10 @@ pub fn read(dir: &str) -> Result<OpenProject, ProjectError> {
     })
 }
 
-/// Persist the given project state, stamping a fresh `modified` time.
+/// Persist the given project state, stamping a fresh `modified` time and the
+/// current schema version (so a migrated v1 project is written back as v2).
 pub fn save(dir: &str, mut project: Project) -> Result<Project, ProjectError> {
+    project.format_version = FORMAT_VERSION;
     project.modified = now_millis();
     write_manifest(Path::new(dir), &project)?;
     Ok(project)
@@ -179,6 +197,17 @@ mod tests {
         assert_eq!(back.project.format_version, FORMAT_VERSION);
         assert_eq!(back.project.created, back.project.modified);
         assert_eq!(back.project, op.project);
+    }
+
+    #[test]
+    fn parse_migrates_v1_file_without_objects() {
+        // A format_version 1 manifest predates the `objects` field entirely.
+        let json = r#"{"format_version":1,"name":"Legacy","created":1,"modified":2}"#;
+        let project = parse(json).unwrap();
+        assert_eq!(project.name, "Legacy");
+        assert!(project.objects.is_empty());
+        // Migrated forward so the next save writes the current schema.
+        assert_eq!(project.format_version, FORMAT_VERSION);
     }
 
     #[test]

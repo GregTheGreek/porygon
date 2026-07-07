@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
 import { useProjectStore, type SaveStatus } from '../store/project';
-import { useCanvasStore } from '../store/canvas';
 
 type Props = {
   version: string;
@@ -18,8 +17,8 @@ export function Toolbar({ version }: Props) {
   const status = useProjectStore((s) => s.status);
   const rename = useProjectStore((s) => s.rename);
   const close = useProjectStore((s) => s.close);
-  const importArtwork = useCanvasStore((s) => s.importArtwork);
-  const importing = useCanvasStore((s) => s.importing);
+  const importObject = useProjectStore((s) => s.importObject);
+  const importing = useProjectStore((s) => s.importing);
 
   return (
     <div className="flex h-9 shrink-0 items-center justify-between border-b border-bg-border bg-bg-raised px-3 select-none">
@@ -45,9 +44,9 @@ export function Toolbar({ version }: Props) {
         {open && (
           <button
             type="button"
-            onClick={() => void importArtwork()}
+            onClick={() => void importObject()}
             disabled={importing}
-            title="Import a PNG onto the canvas"
+            title="Import a PNG as a new object"
             className="rounded px-2 py-0.5 text-xs text-fg-muted hover:bg-bg-input hover:text-fg disabled:opacity-40"
           >
             {importing ? 'Importing…' : 'Import PNG'}

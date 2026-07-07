@@ -1,6 +1,23 @@
 import { invoke } from '@tauri-apps/api/core';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 
+// Mirrors the serde structs in crates/atlas/src/object.rs. Anchor is snapped to
+// the 16px grid by Rust; the frontend never computes it.
+export type Anchor = {
+  x: number;
+  y: number;
+};
+
+// A reusable authoring Object. Metadata only; artwork pixels live on disk under
+// the project's `objects/<id>/` directory and are fetched via readObjectArtwork.
+export type AtlasObject = {
+  id: string;
+  name: string;
+  width: number;
+  height: number;
+  anchor: Anchor;
+};
+
 // Mirrors the serde structs in crates/atlas/src/project.rs. Rust owns the
 // schema; these types just describe what crosses the IPC boundary.
 export type Project = {
@@ -8,6 +25,7 @@ export type Project = {
   name: string;
   created: number;
   modified: number;
+  objects: AtlasObject[];
 };
 
 export type OpenProject = {
@@ -80,4 +98,39 @@ export async function pickPngFile(): Promise<string | null> {
 /// Read, validate, and load a PNG through Rust (no fs plugin needed).
 export async function readArtwork(path: string): Promise<Artwork> {
   return invoke<Artwork>('read_artwork', { path });
+}
+
+/// Import a PNG as a new Object; copies the artwork into the project directory.
+export async function importObject(
+  projectPath: string,
+  sourcePng: string,
+  name: string,
+): Promise<AtlasObject> {
+  return invoke<AtlasObject>('import_object', { projectPath, sourcePng, name });
+}
+
+/// Duplicate an Object (new UUID, copied artwork). Rust returns the new Object.
+export async function duplicateObject(
+  projectPath: string,
+  source: AtlasObject,
+): Promise<AtlasObject> {
+  return invoke<AtlasObject>('duplicate_object', { projectPath, source });
+}
+
+/// Soft-delete an Object's artwork directory (moved to `.trash`, undoable).
+export async function trashObject(projectPath: string, id: string): Promise<void> {
+  return invoke<void>('trash_object', { projectPath, id });
+}
+
+/// Restore a soft-deleted Object's artwork directory (undo of a delete).
+export async function restoreObject(projectPath: string, id: string): Promise<void> {
+  return invoke<void>('restore_object', { projectPath, id });
+}
+
+/// Read an Object's stored artwork (base64 + dimensions) for the Canvas.
+export async function readObjectArtwork(
+  projectPath: string,
+  id: string,
+): Promise<Artwork> {
+  return invoke<Artwork>('read_object_artwork', { projectPath, id });
 }
