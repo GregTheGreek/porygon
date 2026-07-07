@@ -34,8 +34,10 @@ pub struct Problem {
 }
 
 /// Tier 1 problems for one Object. Empty means the object is internally
-/// coherent as far as the current checks go.
-pub fn object_problems(object: &Object) -> Vec<Problem> {
+/// coherent as far as the current checks go. `all` is the project's object
+/// list, needed because the M12 cycle check follows child references; the
+/// object itself does not have to be in `all`.
+pub fn object_problems(object: &Object, all: &[Object]) -> Vec<Problem> {
     let mut problems = Vec::new();
 
     if !object.width.is_multiple_of(CELL) || !object.height.is_multiple_of(CELL) {
@@ -81,7 +83,63 @@ pub fn object_problems(object: &Object) -> Vec<Problem> {
         });
     }
 
+    // A cycle in the scene graph (an object containing itself, directly or
+    // transitively) makes composition impossible (M12). The editor refuses to
+    // create one; this catches hand-edited files. The only child-placement
+    // rule the milestone adds.
+    if has_child_cycle(object, all) {
+        problems.push(Problem {
+            tier: Tier::Object,
+            message: "This object's children contain a loop: an object ends up \
+                      inside itself. Remove the looping child."
+                .to_string(),
+        });
+    }
+
     problems
+}
+
+/// True when any cycle is reachable from `object` through child references.
+/// Gray/black DFS: `path` holds the ids being expanded (a revisit is a
+/// cycle), `done` the ids fully explored, so each object is visited once
+/// even in diamond-shaped graphs.
+fn has_child_cycle(object: &Object, all: &[Object]) -> bool {
+    use std::collections::{BTreeMap, BTreeSet};
+
+    fn visit<'a>(
+        id: &'a str,
+        by_id: &BTreeMap<&'a str, &'a Object>,
+        path: &mut Vec<&'a str>,
+        done: &mut BTreeSet<&'a str>,
+    ) -> bool {
+        if path.contains(&id) {
+            return true;
+        }
+        if done.contains(id) {
+            return false;
+        }
+        let Some(obj) = by_id.get(id) else {
+            return false; // dangling reference: composes to nothing
+        };
+        path.push(id);
+        for c in &obj.children {
+            if visit(c.object_id.as_str(), by_id, path, done) {
+                return true;
+            }
+        }
+        path.pop();
+        done.insert(id);
+        false
+    }
+
+    let mut by_id: BTreeMap<&str, &Object> = all.iter().map(|o| (o.id.as_str(), o)).collect();
+    by_id.insert(object.id.as_str(), object);
+    visit(
+        object.id.as_str(),
+        &by_id,
+        &mut Vec::new(),
+        &mut BTreeSet::new(),
+    )
 }
 
 #[cfg(test)]
@@ -92,13 +150,13 @@ mod tests {
     #[test]
     fn artwork_on_grid_has_no_problems() {
         let obj = Object::for_test("Tree", 32, 48);
-        assert!(object_problems(&obj).is_empty());
+        assert!(object_problems(&obj, &[]).is_empty());
     }
 
     #[test]
     fn artwork_off_grid_warns_tier_one() {
         let obj = Object::for_test("Odd", 30, 48);
-        let problems = object_problems(&obj);
+        let problems = object_problems(&obj, &[]);
         assert_eq!(problems.len(), 1);
         assert_eq!(problems[0].tier, Tier::Object);
         assert!(problems[0].message.contains("16px"));
@@ -106,8 +164,8 @@ mod tests {
 
     #[test]
     fn either_dimension_off_grid_warns() {
-        assert_eq!(object_problems(&Object::for_test("W", 31, 32)).len(), 1);
-        assert_eq!(object_problems(&Object::for_test("H", 32, 31)).len(), 1);
+        assert_eq!(object_problems(&Object::for_test("W", 31, 32), &[]).len(), 1);
+        assert_eq!(object_problems(&Object::for_test("H", 32, 31), &[]).len(), 1);
     }
 
     #[test]
@@ -116,7 +174,7 @@ mod tests {
         // 32x48 -> 2x3 = 6 cells (indices 0..=5).
         let mut obj = Object::for_test("Tree", 32, 48);
         obj.collision.cells.insert(5, CollisionValue::Blocked);
-        assert!(object_problems(&obj).is_empty());
+        assert!(object_problems(&obj, &[]).is_empty());
     }
 
     #[test]
@@ -124,7 +182,7 @@ mod tests {
         use crate::collision::CollisionValue;
         let mut obj = Object::for_test("Tree", 32, 48);
         obj.collision.cells.insert(6, CollisionValue::Blocked); // index 6 == cols*rows
-        let problems = object_problems(&obj);
+        let problems = object_problems(&obj, &[]);
         assert_eq!(problems.len(), 1);
         assert!(problems[0].message.contains("outside the artwork"));
     }
@@ -135,14 +193,68 @@ mod tests {
         let mut obj = Object::for_test("Tree", 32, 48);
         obj.occlusion.pixels.insert(0);
         obj.occlusion.pixels.insert(1535);
-        assert!(object_problems(&obj).is_empty());
+        assert!(object_problems(&obj, &[]).is_empty());
+    }
+
+    #[test]
+    fn child_cycle_warns_tier_one() {
+        use crate::object::ChildPlacement;
+        let mut a = Object::for_test("A", 16, 16);
+        let mut b = Object::for_test("B", 16, 16);
+        a.children.push(ChildPlacement {
+            object_id: b.id.clone(),
+            x: 0,
+            y: 0,
+        });
+        b.children.push(ChildPlacement {
+            object_id: a.id.clone(),
+            x: 0,
+            y: 0,
+        });
+        let all = vec![a.clone(), b];
+        let problems = object_problems(&a, &all);
+        assert_eq!(problems.len(), 1);
+        assert_eq!(problems[0].tier, Tier::Object);
+        assert!(problems[0].message.contains("loop"));
+    }
+
+    #[test]
+    fn diamond_children_are_not_a_cycle() {
+        use crate::object::ChildPlacement;
+        let mut a = Object::for_test("A", 16, 16);
+        let mut b = Object::for_test("B", 16, 16);
+        let mut c = Object::for_test("C", 16, 16);
+        let d = Object::for_test("D", 16, 16);
+        let child = |o: &Object| ChildPlacement {
+            object_id: o.id.clone(),
+            x: 0,
+            y: 0,
+        };
+        b.children.push(child(&d));
+        c.children.push(child(&d));
+        a.children.push(child(&b));
+        a.children.push(child(&c));
+        let all = vec![a.clone(), b, c, d];
+        assert!(object_problems(&a, &all).is_empty());
+    }
+
+    #[test]
+    fn missing_child_reference_is_not_flagged() {
+        use crate::object::ChildPlacement;
+        let mut a = Object::for_test("A", 16, 16);
+        a.children.push(ChildPlacement {
+            object_id: "gone".to_string(),
+            x: 0,
+            y: 0,
+        });
+        assert!(object_problems(&a, &[a.clone()]).is_empty());
     }
 
     #[test]
     fn out_of_bounds_occlusion_warns() {
         let mut obj = Object::for_test("Tree", 32, 48);
         obj.occlusion.pixels.insert(1536); // index 1536 == width*height
-        let problems = object_problems(&obj);
+        let problems = object_problems(&obj, &[]);
         assert_eq!(problems.len(), 1);
         assert_eq!(problems[0].tier, Tier::Object);
         assert!(problems[0].message.contains("occlusion"));

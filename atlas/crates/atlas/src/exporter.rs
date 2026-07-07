@@ -200,8 +200,23 @@ pub(crate) fn gate(members: &[LoadedMember]) -> Result<(), String> {
     }
 
     for m in members {
-        for p in crate::validity::object_problems(&m.object) {
+        // Tier 1 sweeps the member and everything composed into it (M12): a
+        // child's problem corrupts the flattened result just the same. The
+        // member + descendants set is exactly the graph reachable through
+        // children, which is all the cycle check needs to see.
+        let scope: Vec<crate::object::Object> = std::iter::once(m.object.clone())
+            .chain(m.descendants.iter().cloned())
+            .collect();
+        for p in crate::validity::object_problems(&m.object, &scope) {
             blockers.push(format!("\"{}\": {}", m.object.name, p.message));
+        }
+        for d in &m.descendants {
+            for p in crate::validity::object_problems(d, &scope) {
+                blockers.push(format!(
+                    "\"{}\" (inside \"{}\"): {}",
+                    d.name, m.object.name, p.message
+                ));
+            }
         }
     }
 
@@ -212,10 +227,12 @@ pub(crate) fn gate(members: &[LoadedMember]) -> Result<(), String> {
     }
 
     // Pre-resolve every Custom tag: an unknown tag would otherwise surface as a
-    // raw Porytiles "unknown metatile behavior" error at Tier 3.
+    // raw Porytiles "unknown metatile behavior" error at Tier 3. The flattened
+    // collision is checked (not just the member's own) so tags painted on
+    // children are covered too - it is what compose actually emits.
     let behaviors = behavior_map();
     for m in members {
-        for value in m.object.collision.cells.values() {
+        for value in m.flat.collision.values() {
             if let CollisionValue::Custom(tag) = value {
                 if !behaviors.contains_key(tag.as_str()) {
                     blockers.push(format!(
@@ -261,10 +278,11 @@ pub(crate) fn compose(
     tileset_name: &str,
     members: &[LoadedMember],
 ) -> Result<(Bundle, Vec<CompiledObject>), String> {
-    // Flat cell sequence: members in authoring order, cells row-major each.
+    // Flat cell sequence: members in authoring order, cells row-major each,
+    // over each member's COMPOSED grid (children flattened in, M12).
     let mut cells: Vec<CellRef> = Vec::new();
     for (mi, m) in members.iter().enumerate() {
-        let (cols, rows) = grid_dims(m.art.width, m.art.height);
+        let (cols, rows) = grid_dims(m.flat.width, m.flat.height);
         for row in 0..rows {
             for col in 0..cols {
                 cells.push(CellRef {
@@ -298,11 +316,11 @@ pub(crate) fn compose(
                 let gy = c.row * METATILE_PX + py;
                 // Pixels past the artwork edge stay transparent padding; the
                 // Tier 1 gate already refused off-grid artwork.
-                if gx >= m.art.width || gy >= m.art.height {
+                if gx >= m.flat.width || gy >= m.flat.height {
                     continue;
                 }
-                let idx = gy * m.art.width + gx;
-                let p = m.art.pixels[idx as usize];
+                let idx = gy * m.flat.width + gx;
+                let p = m.flat.pixels[idx as usize];
                 if budgets::is_transparent(p) {
                     continue;
                 }
@@ -310,7 +328,7 @@ pub(crate) fn compose(
                 // Alpha is normalised to opaque: the GBA palette is RGB and the
                 // budget maths keys colours by RGB for the same reason.
                 let out = [p[0], p[1], p[2], 255];
-                if m.object.occlusion.pixels.contains(&idx) {
+                if m.flat.occlusion.contains(&idx) {
                     top[dest] = out;
                 } else {
                     middle[dest] = out;
@@ -326,12 +344,11 @@ pub(crate) fn compose(
     let mut compiled: Vec<Vec<CompiledCell>> = members.iter().map(|_| Vec::new()).collect();
     for (i, c) in cells.iter().enumerate() {
         let m = &members[c.member];
-        let (cols, _) = grid_dims(m.art.width, m.art.height);
+        let (cols, _) = grid_dims(m.flat.width, m.flat.height);
         let cell_index = c.row * cols + c.col;
         let collision = m
-            .object
+            .flat
             .collision
-            .cells
             .get(&cell_index)
             .cloned()
             .unwrap_or(CollisionValue::Walkable);
@@ -364,20 +381,22 @@ pub(crate) fn compose(
     let mut compiled_objects = Vec::with_capacity(members.len());
     let mut used_names: Vec<String> = Vec::new();
     for (m, obj_cells) in members.iter().zip(compiled) {
-        let (cols, rows) = grid_dims(m.art.width, m.art.height);
+        let (cols, rows) = grid_dims(m.flat.width, m.flat.height);
         let base = slugify(&m.object.name, "object");
         let name = dedupe_name(&base, &mut used_names);
+        // The Compiled Object records the FLATTENED object (compiler.md: the
+        // exporter flattens the graph): composed dims, composed anchor.
         let compiled_object = CompiledObject {
-            anchor: m.object.anchor,
+            anchor: m.flat.anchor,
             cells: obj_cells,
             cols,
             format_version: ATLASOBJECT_VERSION,
-            height: m.art.height,
+            height: m.flat.height,
             id: m.object.id.clone(),
             name: m.object.name.clone(),
             rows,
             tileset: tileset_name.to_string(),
-            width: m.art.width,
+            width: m.flat.width,
         };
         let json = serde_json::to_string_pretty(&compiled_object)
             .map_err(|e| format!("Could not encode \"{}\": {e}", m.object.name))?;
@@ -399,8 +418,10 @@ pub(crate) fn compose(
 
 /// Encode RGBA pixels to PNG bytes with every setting pinned (RGBA 8-bit,
 /// non-interlaced, Balanced compression, NoFilter) so encoding is
-/// settings-stable: identical pixels always produce identical bytes.
-fn encode_png(width: u32, height: u32, pixels: &[[u8; 4]]) -> Result<Vec<u8>, String> {
+/// settings-stable: identical pixels always produce identical bytes. Also
+/// used by the canvas composition (scene.rs), so preview and export share
+/// one encoder.
+pub(crate) fn encode_png(width: u32, height: u32, pixels: &[[u8; 4]]) -> Result<Vec<u8>, String> {
     let mut bytes = Vec::new();
     let mut encoder = png::Encoder::new(&mut bytes, width, height);
     encoder.set_color(png::ColorType::Rgba);
@@ -892,6 +913,116 @@ mod tests {
         assert_eq!(symbolize("Forest Set"), "gTileset_ForestSet");
         assert_eq!(symbolize("atlas spike"), "gTileset_AtlasSpike");
         assert_eq!(symbolize("!!!"), "gTileset_Tileset");
+    }
+
+    /// Build a project whose objects may reference each other as children,
+    /// with one tileset containing only `member_ids`.
+    fn project_with_graph(
+        objects: Vec<(Object, Vec<[u8; 4]>)>,
+        member_ids: Vec<String>,
+    ) -> (PathBuf, String) {
+        let loc = temp_dir("graph");
+        let open = crate::project::create(loc.to_str().unwrap(), "P").unwrap();
+        let project_dir = PathBuf::from(&open.path);
+        let mut project = open.project;
+        let mut tileset = crate::tileset::Tileset::new("Set");
+        tileset.members = member_ids;
+        for (obj, pixels) in objects {
+            write_artwork(&project_dir, &obj.id, obj.width, obj.height, &pixels);
+            project.objects.push(obj);
+        }
+        let tileset_id = tileset.id.clone();
+        project.tilesets.push(tileset);
+        crate::project::save(open.path.as_str(), project).unwrap();
+        (project_dir, tileset_id)
+    }
+
+    #[test]
+    fn children_flatten_into_the_member_before_decomposition() {
+        use crate::object::{Anchor, ChildPlacement};
+        // A 16x16 parent with a 16x16 child to its right. The child is NOT a
+        // tileset member but is composed into the parent (M12): the emitted
+        // sheet, attributes.csv, budgets, and the .atlasobject all reflect
+        // the flattened 2x1 grid, through the one shared flattening path.
+        let (mut parent, ppx) = solid_object("House", 16, 16, [1, 1, 1], false);
+        parent.anchor = Anchor { x: 0, y: 0 };
+        let (mut child, cpx) = solid_object("Sign", 16, 16, [2, 2, 2], false);
+        child.anchor = Anchor { x: 0, y: 0 };
+        child
+            .collision
+            .cells
+            .insert(0, CollisionValue::Custom("tall_grass".to_string()));
+        parent.children.push(ChildPlacement {
+            object_id: child.id.clone(),
+            x: 16,
+            y: 0,
+        });
+        let member_ids = vec![parent.id.clone()];
+        let (project, tileset_id) =
+            project_with_graph(vec![(parent, ppx), (child, cpx)], member_ids);
+
+        // Budgets see the composed grid: 2 metatiles, 2 tile shapes.
+        let budget =
+            budgets::compute_for_tileset(project.to_str().unwrap(), &tileset_id).unwrap();
+        assert_eq!(budget.metatiles.used, 2);
+        assert!(budget.problems.is_empty());
+
+        let dest = temp_dir("m12");
+        let result =
+            export_tileset(project.to_str().unwrap(), &tileset_id, dest.to_str().unwrap())
+                .unwrap();
+        let root = PathBuf::from(&result.path);
+
+        // Sheet: parent pixels in cell 0, child pixels in cell 1.
+        let (w, h, middle) = decode(&root.join(PORYTILES_SRC_DIR).join("middle.png"));
+        assert_eq!((w, h), (32, 16));
+        assert_eq!(middle[0], [1, 1, 1, 255]);
+        assert_eq!(middle[16], [2, 2, 2, 255]);
+
+        // The child's custom tag flows into attributes.csv at the composed cell.
+        let csv = fs::read_to_string(root.join(PORYTILES_SRC_DIR).join("attributes.csv"))
+            .unwrap();
+        assert_eq!(csv, "id,behavior\n1,MB_TALL_GRASS\n");
+
+        // One .atlasobject (members only), reflecting the flattened object.
+        let house: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(root.join("house.atlasobject")).unwrap())
+                .unwrap();
+        assert_eq!(house["cols"], 2);
+        assert_eq!(house["rows"], 1);
+        assert_eq!(house["width"], 32);
+        assert_eq!(house["cells"][1]["behavior"], "MB_TALL_GRASS");
+        assert!(!root.join("sign.atlasobject").exists());
+
+        // Determinism holds for composed objects too.
+        let dest2 = temp_dir("m12det");
+        let r2 = export_tileset(project.to_str().unwrap(), &tileset_id, dest2.to_str().unwrap())
+            .unwrap();
+        assert_eq!(snapshot(&root), snapshot(Path::new(&r2.path)));
+    }
+
+    #[test]
+    fn cyclic_children_are_refused_with_no_output() {
+        use crate::object::ChildPlacement;
+        let (mut a, pa) = solid_object("A", 16, 16, [1, 1, 1], false);
+        let (mut b, pb) = solid_object("B", 16, 16, [2, 2, 2], false);
+        a.children.push(ChildPlacement {
+            object_id: b.id.clone(),
+            x: 16,
+            y: 0,
+        });
+        b.children.push(ChildPlacement {
+            object_id: a.id.clone(),
+            x: 16,
+            y: 0,
+        });
+        let member_ids = vec![a.id.clone()];
+        let (project, tileset_id) = project_with_graph(vec![(a, pa), (b, pb)], member_ids);
+        let dest = temp_dir("cycle");
+        let err = export_tileset(project.to_str().unwrap(), &tileset_id, dest.to_str().unwrap())
+            .unwrap_err();
+        assert!(err.contains("inside itself"), "got: {err}");
+        assert_eq!(fs::read_dir(&dest).unwrap().count(), 0, "no partial output");
     }
 
     #[test]

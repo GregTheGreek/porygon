@@ -20,11 +20,29 @@ export function Canvas() {
   const setSelected = useCanvasStore((s) => s.setSelected);
   // The selected Object's anchor drives the crosshair marker. The reference is
   // stable across unrelated store updates, so this only re-fires on real edits.
-  const anchor = useProjectStore((s) =>
+  const ownAnchor = useProjectStore((s) =>
     s.open && s.selectedObjectId
       ? s.open.project.objects.find((o) => o.id === s.selectedObjectId)?.anchor ?? null
       : null,
   );
+  // The selected Object itself (stable reference until patched): its own
+  // footprint bounds the brushes when the composed view is shown (M12).
+  const selectedObject = useProjectStore((s) =>
+    s.open && s.selectedObjectId
+      ? s.open.project.objects.find((o) => o.id === s.selectedObjectId) ?? null
+      : null,
+  );
+  // The composed view (M12): non-null when the selected object has children.
+  // Its collision/occlusion/anchor supersede the object's own on the canvas,
+  // so overlays and play mode operate on the flattened result.
+  const composed = useProjectStore((s) => s.composed);
+  const composeError = useProjectStore((s) => s.composeError);
+  const selectedChildIndex = useProjectStore((s) => s.selectedChildIndex);
+  const refreshComposed = useProjectStore((s) => s.refreshComposed);
+  const selectedObjectId = useProjectStore((s) => s.selectedObjectId);
+  // Any object edit (paint, child add/remove/nudge, anchor, undo/redo) can
+  // change the composition, so the objects array reference drives refresh.
+  const objects = useProjectStore((s) => s.open?.project.objects ?? null);
   const error = useProjectStore((s) => s.error);
   const importing = useProjectStore((s) => s.importing);
   const importObject = useProjectStore((s) => s.importObject);
@@ -32,7 +50,7 @@ export function Canvas() {
 
   // The selected Object's collision cells drive the overlay. The reference is
   // stable until the object is edited, so this only re-fires on real changes.
-  const collisionCells = useProjectStore((s) =>
+  const ownCollisionCells = useProjectStore((s) =>
     s.open && s.selectedObjectId
       ? s.open.project.objects.find((o) => o.id === s.selectedObjectId)?.collision.cells ??
         NO_CELLS
@@ -40,12 +58,16 @@ export function Canvas() {
   );
   // The selected Object's occlusion pixels drive the occlusion overlay. Stable
   // until edited, like the collision selector above.
-  const occlusionPixels = useProjectStore((s) =>
+  const ownOcclusionPixels = useProjectStore((s) =>
     s.open && s.selectedObjectId
       ? s.open.project.objects.find((o) => o.id === s.selectedObjectId)?.occlusion.pixels ??
         NO_PIXELS
       : NO_PIXELS,
   );
+  // Effective canvas data: composed when children are shown, own otherwise.
+  const collisionCells = composed ? composed.collision.cells : ownCollisionCells;
+  const occlusionPixels = composed ? composed.occlusion.pixels : ownOcclusionPixels;
+  const anchor = composed ? composed.anchor : ownAnchor;
   const paintMode = useCanvasStore((s) => s.paintMode);
   const setPaintMode = useCanvasStore((s) => s.setPaintMode);
   const collisionVisible = useCanvasStore((s) => s.collisionVisible);
@@ -114,8 +136,16 @@ export function Canvas() {
           project.open && project.selectedObjectId
             ? project.open.project.objects.find((o) => o.id === project.selectedObjectId)
             : undefined;
-        engine.setCollision(selected?.collision.cells ?? NO_CELLS);
-        engine.setOcclusion(selected?.occlusion.pixels ?? NO_PIXELS);
+        // Composed data supersedes the object's own when children are shown.
+        const comp = project.composed;
+        engine.setCollision(comp?.collision.cells ?? selected?.collision.cells ?? NO_CELLS);
+        engine.setOcclusion(comp?.occlusion.pixels ?? selected?.occlusion.pixels ?? NO_PIXELS);
+        if (comp) engine.setAnchor(comp.anchor);
+        engine.setPaintBounds(
+          comp && selected
+            ? { x: comp.origin_x, y: comp.origin_y, width: selected.width, height: selected.height }
+            : null,
+        );
         if (canvas.artwork) void engine.loadArtwork(canvas.artwork);
       })
       .catch((e: unknown) => {
@@ -134,13 +164,56 @@ export function Canvas() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Push artwork changes into the engine.
+  // Push artwork changes into the engine. A reload of the SAME object (a
+  // recompose after a child edit, M12) preserves the view instead of
+  // re-fitting; a different object still fits fresh.
+  const lastArtworkObjectId = useRef<string | null>(null);
   useEffect(() => {
     const engine = engineRef.current;
     if (!engine) return;
-    if (artwork) void engine.loadArtwork(artwork);
-    else engine.clearArtwork();
+    if (artwork) {
+      const preserve =
+        artwork.objectId !== undefined &&
+        artwork.objectId === lastArtworkObjectId.current;
+      lastArtworkObjectId.current = artwork.objectId ?? null;
+      void engine.loadArtwork(artwork, preserve);
+    } else {
+      lastArtworkObjectId.current = null;
+      engine.clearArtwork();
+    }
   }, [artwork]);
+
+  // Recompute the composed view whenever the project's objects or the
+  // selection change (paints, child edits, anchors, undo/redo). No-op and
+  // cheap when the selected object has no children.
+  useEffect(() => {
+    void refreshComposed();
+  }, [objects, selectedObjectId, refreshComposed]);
+
+  // Bound the brushes to the parent's own footprint while composed (M12).
+  useEffect(() => {
+    engineRef.current?.setPaintBounds(
+      composed && selectedObject
+        ? {
+            x: composed.origin_x,
+            y: composed.origin_y,
+            width: selectedObject.width,
+            height: selectedObject.height,
+          }
+        : null,
+    );
+  }, [composed, selectedObject]);
+
+  // Highlight the selected child's footprint on the canvas (M12).
+  useEffect(() => {
+    const fp =
+      composed && selectedChildIndex !== null
+        ? composed.children[selectedChildIndex] ?? null
+        : null;
+    engineRef.current?.setChildHighlight(
+      fp ? { x: fp.x, y: fp.y, width: fp.width, height: fp.height } : null,
+    );
+  }, [composed, selectedChildIndex]);
 
   // Play mode needs an object to play on: losing the artwork (deselect,
   // delete) drops back to Select so the store and engine stay coherent.
@@ -252,9 +325,9 @@ export function Canvas() {
           </div>
         )}
 
-        {(engineError ?? error) && (
+        {(engineError ?? composeError ?? error) && (
           <p className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded border border-red-500/40 bg-red-500/10 px-3 py-1.5 text-xs text-red-300">
-            {engineError ?? error}
+            {engineError ?? composeError ?? error}
           </p>
         )}
       </div>

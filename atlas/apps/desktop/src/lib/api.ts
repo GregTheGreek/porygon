@@ -24,6 +24,16 @@ export type Collision = { cells: Record<string, CollisionValue> };
 // indices (row-major y*width+x). Absence means "renders in front of the player".
 export type Occlusion = { pixels: number[] };
 
+// One child instance placed on an Object (M12). Mirrors ChildPlacement in
+// crates/atlas/src/object.rs: `object_id` references another Object; `x`/`y`
+// are the signed offset in pixels (16px-grid-snapped) from the parent's anchor
+// to the child's anchor. Translation only.
+export type ChildPlacement = {
+  object_id: string;
+  x: number;
+  y: number;
+};
+
 // A reusable authoring Object. Metadata only; artwork pixels live on disk under
 // the project's `objects/<id>/` directory and are fetched via readObjectArtwork.
 export type AtlasObject = {
@@ -36,6 +46,33 @@ export type AtlasObject = {
   tags: string[];
   collision: Collision;
   occlusion: Occlusion;
+  children: ChildPlacement[];
+};
+
+// A direct child's flattened footprint in composed space, for the canvas
+// selection highlight. Mirrors ChildFootprint in crates/atlas/src/scene.rs;
+// index-aligned with the parent's `children` (null = missing object).
+export type ChildFootprint = {
+  object_id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+// The composed view of one Object for the canvas (M12): flattened artwork as
+// base64 PNG plus composed collision/occlusion, the anchor and the parent's
+// origin in composed space. Mirrors ComposedObject in crates/atlas/src/scene.rs.
+export type ComposedObject = {
+  width: number;
+  height: number;
+  anchor: Anchor;
+  origin_x: number;
+  origin_y: number;
+  art_data: string;
+  collision: Collision;
+  occlusion: Occlusion;
+  children: (ChildFootprint | null)[];
 };
 
 // One entry in the engine's custom collision-tag vocabulary (from the
@@ -247,8 +284,24 @@ export async function getCollisionTags(): Promise<CollisionTag[]> {
 }
 
 /// Tier 1 (Object) validity problems for an Object, in artist terms.
-export async function getObjectProblems(object: AtlasObject): Promise<Problem[]> {
-  return invoke<Problem[]>('object_problems', { object });
+/// `objects` is the project's object list: the M12 cycle check follows
+/// child references.
+export async function getObjectProblems(
+  object: AtlasObject,
+  objects: AtlasObject[],
+): Promise<Problem[]> {
+  return invoke<Problem[]>('object_problems', { object, objects });
+}
+
+/// Compose an Object with its children for the canvas (M12). The in-memory
+/// project is passed so unsaved edits are composed too; only the immutable
+/// artwork pixels are read from disk. Same flattening path as budgets/export.
+export async function composeObject(
+  projectPath: string,
+  project: Project,
+  objectId: string,
+): Promise<ComposedObject> {
+  return invoke<ComposedObject>('compose_object', { projectPath, project, objectId });
 }
 
 /// Mint a fresh, empty Tileset (new UUID minted in Rust, like Object import).

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { useProjectStore } from '../store/project';
+import { useProjectStore, wouldCreateCycle } from '../store/project';
+import type { AtlasObject } from '../lib/api';
 
 // Right panel: live, dialog-free metadata editing for the selected Object.
 // Fields commit on blur/Enter; every commit is an undoable store mutation, so
@@ -67,8 +68,104 @@ export function Inspector() {
         </div>
       </Field>
 
+      <Field label="Children">
+        <ChildrenEditor object={object} />
+      </Field>
+
       {/* Tier 1 problems moved to the bottom Problems panel (M11), which
           unifies all three validity tiers in one place. */}
+    </div>
+  );
+}
+
+// The Hierarchy section (M12): the selected object's child placements. Add a
+// child from the library (cycle-creating candidates are excluded), nudge its
+// anchor-to-anchor offset on the 16px grid, remove it, or click a row to
+// highlight the child's footprint on the canvas. Every mutation is undoable.
+function ChildrenEditor({ object }: { object: AtlasObject }) {
+  const objects = useProjectStore((s) => s.open?.project.objects ?? []);
+  const addObjectChild = useProjectStore((s) => s.addObjectChild);
+  const removeObjectChild = useProjectStore((s) => s.removeObjectChild);
+  const setObjectChildOffset = useProjectStore((s) => s.setObjectChildOffset);
+  const selectedChildIndex = useProjectStore((s) => s.selectedChildIndex);
+  const selectChild = useProjectStore((s) => s.selectChild);
+
+  const byId = new Map(objects.map((o) => [o.id, o]));
+  const candidates = objects.filter(
+    (o) => o.id !== object.id && !wouldCreateCycle(objects, object.id, o.id),
+  );
+
+  return (
+    <div className="mt-1 space-y-1.5">
+      {object.children.map((child, i) => {
+        const childObj = byId.get(child.object_id);
+        const selected = selectedChildIndex === i;
+        return (
+          <div
+            key={i}
+            className={`rounded border px-2 py-1.5 ${
+              selected ? 'border-accent bg-accent/10' : 'border-bg-border bg-bg-input/40'
+            }`}
+          >
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                title="Highlight this child's footprint on the canvas"
+                onClick={() => selectChild(selected ? null : i)}
+                className={`min-w-0 flex-1 truncate text-left text-sm ${
+                  childObj ? 'text-fg' : 'italic text-fg-subtle'
+                }`}
+              >
+                {childObj ? childObj.name : 'Missing object'}
+              </button>
+              <button
+                type="button"
+                title="Remove this child"
+                onClick={() => removeObjectChild(object.id, i)}
+                className="shrink-0 rounded px-1 py-0.5 text-xs text-fg-subtle hover:bg-red-500/20 hover:text-red-300"
+              >
+                Remove
+              </button>
+            </div>
+            <div className="mt-1 flex items-center gap-2">
+              <NumberField
+                label="X"
+                value={child.x}
+                onCommit={(v) => setObjectChildOffset(object.id, i, v, child.y)}
+              />
+              <NumberField
+                label="Y"
+                value={child.y}
+                onCommit={(v) => setObjectChildOffset(object.id, i, child.x, v)}
+              />
+            </div>
+          </div>
+        );
+      })}
+
+      {object.children.length === 0 && (
+        <p className="text-xs text-fg-subtle">
+          No children. Add an object to compose it under this one.
+        </p>
+      )}
+
+      <select
+        value=""
+        disabled={candidates.length === 0}
+        onChange={(e) => {
+          if (e.target.value) addObjectChild(object.id, e.target.value);
+        }}
+        className={`w-full ${INPUT_CLASS} disabled:opacity-40`}
+      >
+        <option value="">
+          {candidates.length === 0 ? 'No addable objects' : 'Add child…'}
+        </option>
+        {candidates.map((o) => (
+          <option key={o.id} value={o.id}>
+            {o.name}
+          </option>
+        ))}
+      </select>
     </div>
   );
 }

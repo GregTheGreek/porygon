@@ -11,6 +11,7 @@ mod porytiles;
 mod prefabs;
 mod project;
 mod recents;
+mod scene;
 mod settings;
 mod tileset;
 mod validity;
@@ -137,10 +138,26 @@ fn collision_tags() -> Vec<CollisionTag> {
 }
 
 /// Tier 1 (Object) validity problems for one Object, in artist terms. The
-/// Inspector renders these in its Problems section. Empty means coherent.
+/// Problems panel renders these. Empty means coherent. `objects` is the
+/// project's object list: the M12 cycle check follows child references.
 #[tauri::command]
-fn object_problems(object: Object) -> Vec<Problem> {
-    validity::object_problems(&object)
+fn object_problems(object: Object, objects: Vec<Object>) -> Vec<Problem> {
+    validity::object_problems(&object, &objects)
+}
+
+/// Compose one Object with its children for the canvas (M12): flattened
+/// artwork (PNG, base64), composed collision/occlusion, the anchor and root
+/// origin in composed space, and direct child footprints. The project state
+/// comes in-memory from the frontend (edits may not have autosaved yet);
+/// only the immutable artwork pixels are read from disk. Same flattening
+/// path as budgets and export, so preview and emission can never disagree.
+#[tauri::command]
+fn compose_object(
+    project_path: String,
+    project: Project,
+    object_id: String,
+) -> Result<scene::ComposedObject, String> {
+    scene::compose_for_canvas(&project_path, &project, &object_id)
 }
 
 /// Mint a fresh, empty Tileset (new UUID, given name). Id generation lives in
@@ -244,6 +261,7 @@ pub fn run() {
             read_object_artwork,
             collision_tags,
             object_problems,
+            compose_object,
             create_tileset,
             tileset_budget,
             export_tileset,

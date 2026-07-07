@@ -4,7 +4,10 @@ import type { CollisionValue } from '../lib/api';
 // The artwork currently shown on the Canvas, as a ready-to-display data URL
 // plus display metadata. Driven by the selected Object (see store/project.ts):
 // selecting an object loads its artwork here; deselecting or closing clears it.
+// `objectId` identifies the Object the pixels belong to, so a recompose of the
+// same object (M12) can preserve the view instead of re-fitting.
 export type CanvasArtwork = {
+  objectId?: string;
   name: string;
   width: number;
   height: number;

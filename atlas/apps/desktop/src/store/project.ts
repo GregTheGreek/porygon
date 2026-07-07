@@ -6,6 +6,7 @@ import type {
   Collision,
   CollisionValue,
   CompileResult,
+  ComposedObject,
   ExportResult,
   Occlusion,
   OpenProject,
@@ -35,6 +36,75 @@ const snapToGrid = (v: number) => Math.floor((v + GRID / 2) / GRID) * GRID;
 const clamp = (v: number, lo: number, hi: number) =>
   Math.min(Math.max(v, lo), hi);
 
+// Editor bound for a child placement offset, in pixels. Keeps the composed
+// bounding box comfortably inside the Rust-side composition cap (scene.rs);
+// an input bound like the anchor clamp, not a validity rule.
+const CHILD_OFFSET_LIMIT = 1024;
+
+// True when placing `childId` under `parentId` would make an object contain
+// itself, directly or transitively: parentId reachable from childId through
+// children. Mirrors the Rust guards (scene.rs flatten, validity.rs Tier 1);
+// this is the mutation-path enforcement - the edit is refused outright.
+export function wouldCreateCycle(
+  objects: AtlasObject[],
+  parentId: string,
+  childId: string,
+): boolean {
+  if (parentId === childId) return true;
+  const byId = new Map(objects.map((o) => [o.id, o]));
+  const stack = [childId];
+  const seen = new Set<string>();
+  while (stack.length > 0) {
+    const id = stack.pop()!;
+    if (id === parentId) return true;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    for (const c of byId.get(id)?.children ?? []) stack.push(c.object_id);
+  }
+  return false;
+}
+
+// Composed-space -> parent-space index mapping for paint strokes (M12). When
+// children are shown, the canvas paints on the COMPOSED grid, but painted
+// data always lives on the parent object's own grid, so stroke indices
+// translate back through the parent's origin in composed space. Indices
+// outside the parent's footprint are dropped (the engine's paint bounds
+// already prevent them; this is the mapping-side backstop).
+function mapComposedCells(
+  composed: ComposedObject,
+  obj: AtlasObject,
+  indices: number[],
+): number[] {
+  const compCols = Math.ceil(composed.width / GRID);
+  const parentCols = Math.ceil(obj.width / GRID);
+  const parentRows = Math.ceil(obj.height / GRID);
+  const offCol = Math.floor(composed.origin_x / GRID);
+  const offRow = Math.floor(composed.origin_y / GRID);
+  const out: number[] = [];
+  for (const i of indices) {
+    const col = (i % compCols) - offCol;
+    const row = Math.floor(i / compCols) - offRow;
+    if (col < 0 || row < 0 || col >= parentCols || row >= parentRows) continue;
+    out.push(row * parentCols + col);
+  }
+  return out;
+}
+
+function mapComposedPixels(
+  composed: ComposedObject,
+  obj: AtlasObject,
+  indices: number[],
+): number[] {
+  const out: number[] = [];
+  for (const i of indices) {
+    const x = (i % composed.width) - composed.origin_x;
+    const y = Math.floor(i / composed.width) - composed.origin_y;
+    if (x < 0 || y < 0 || x >= obj.width || y >= obj.height) continue;
+    out.push(y * obj.width + x);
+  }
+  return out;
+}
+
 type ProjectState = {
   open: OpenProject | null;
   recents: Recent[];
@@ -45,6 +115,16 @@ type ProjectState = {
   // is deliberately not undoable.
   selectedObjectId: string | null;
   importing: boolean;
+
+  // The composed view of the selected object when it has children (M12):
+  // flattened artwork/collision/occlusion from Rust, the single source of
+  // truth shared with budgets and export. Null when the selected object has
+  // no children (the raw single-object path applies). View state.
+  composed: ComposedObject | null;
+  composeError: string | null;
+  // Index into the selected object's `children` whose footprint is
+  // highlighted on the canvas. View state, not undoable.
+  selectedChildIndex: number | null;
 
   // Which Tileset is open in the Builder (center region). Mutually exclusive
   // with an object selection: opening one clears the other. View state, not
@@ -78,6 +158,18 @@ type ProjectState = {
   addObjectTag: (id: string, tag: string) => void;
   removeObjectTag: (id: string, tag: string) => void;
   setObjectAnchor: (id: string, x: number, y: number) => void;
+
+  // Scene-graph edits (M12). All undoable, all through autosave. Placements
+  // are addressed by index into the parent's `children`. addObjectChild
+  // refuses a placement that would create a cycle.
+  addObjectChild: (parentId: string, childObjectId: string) => void;
+  removeObjectChild: (parentId: string, index: number) => void;
+  setObjectChildOffset: (parentId: string, index: number, x: number, y: number) => void;
+  // Highlight one child's footprint on the canvas. View state.
+  selectChild: (index: number | null) => void;
+  // Recompute the composed view for the selected object (null when it has no
+  // children). Driven by the Canvas whenever project objects change.
+  refreshComposed: () => Promise<void>;
 
   // Collision painting (M6). One command per brush stroke; the Canvas engine
   // reports the cells a stroke touched and the value to apply.
@@ -124,6 +216,10 @@ export const useProjectStore = create<ProjectState>((set, get) => {
   // Debounce timer for autosave, kept in the closure rather than in state so a
   // pending save never triggers a re-render.
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
+
+  // Monotonic ticket for compose requests, so an older in-flight result can
+  // never overwrite a newer one (strokes can queue several recomposes).
+  let composeSeq = 0;
 
   const flushSave = async () => {
     const current = get().open;
@@ -337,7 +433,14 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     useHistory.getState().clear();
     useCanvasStore.getState().clear();
     clearTilesetDerived();
-    set({ selectedObjectId: null, selectedTilesetId: null, importing: false });
+    set({
+      selectedObjectId: null,
+      selectedTilesetId: null,
+      importing: false,
+      composed: null,
+      composeError: null,
+      selectedChildIndex: null,
+    });
   };
 
   return {
@@ -347,6 +450,9 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     error: null,
     selectedObjectId: null,
     importing: false,
+    composed: null,
+    composeError: null,
+    selectedChildIndex: null,
     selectedTilesetId: null,
     budget: null,
     budgetComputing: false,
@@ -411,7 +517,13 @@ export const useProjectStore = create<ProjectState>((set, get) => {
 
     selectObject: async (id) => {
       // Opening an object closes any open Tileset Builder (center is one view).
-      set({ selectedObjectId: id, selectedTilesetId: id === null ? get().selectedTilesetId : null });
+      set({
+        selectedObjectId: id,
+        selectedTilesetId: id === null ? get().selectedTilesetId : null,
+        composed: null,
+        composeError: null,
+        selectedChildIndex: null,
+      });
       const canvas = useCanvasStore.getState();
       if (id === null) {
         canvas.setArtwork(null);
@@ -423,11 +535,17 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         canvas.setArtwork(null);
         return;
       }
+      // An object with children shows COMPOSED: refreshComposed (driven by
+      // the Canvas whenever objects or the selection change) supplies the
+      // artwork, so the raw read is skipped to avoid a flash of the parent
+      // alone.
+      if (obj.children.length > 0) return;
       try {
         const art = await api.readObjectArtwork(current.path, id);
         // Guard against a fast re-selection while the read was in flight.
         if (get().selectedObjectId !== id) return;
         useCanvasStore.getState().setArtwork({
+          objectId: id,
           name: obj.name,
           width: art.width,
           height: art.height,
@@ -534,6 +652,12 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         .filter((t) => t.members.includes(id))
         .map((t) => ({ id: t.id, members: [...t.members] }));
 
+      // Same story for child placements (M12): parents referencing the
+      // deleted object lose those placements, and undo restores them.
+      const affectedParents = current.project.objects
+        .filter((o) => o.id !== id && o.children.some((c) => c.object_id === id))
+        .map((o) => ({ id: o.id, children: [...o.children] }));
+
       const scrubMembership = () => {
         for (const t of affected) {
           patchTileset(
@@ -541,9 +665,17 @@ export const useProjectStore = create<ProjectState>((set, get) => {
             { members: t.members.filter((m) => m !== id) },
           );
         }
+        for (const p of affectedParents) {
+          patchObject(p.id, {
+            children: p.children.filter((c) => c.object_id !== id),
+          });
+        }
       };
       const restoreMembership = () => {
         for (const t of affected) patchTileset(t.id, { members: t.members });
+        for (const p of affectedParents) {
+          patchObject(p.id, { children: p.children });
+        }
       };
 
       try {
@@ -613,9 +745,107 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       commitPatch('Edit anchor', id, { anchor: obj.anchor }, { anchor: next });
     },
 
+    addObjectChild: (parentId, childObjectId) => {
+      const current = get().open;
+      const obj = current?.project.objects.find((o) => o.id === parentId);
+      if (!current || !obj) return;
+      if (!current.project.objects.some((o) => o.id === childObjectId)) return;
+      // Cycle guard: an object can never contain itself, directly or
+      // transitively. The Rust flatten/validity guards back this up.
+      if (wouldCreateCycle(current.project.objects, parentId, childObjectId)) return;
+      // Default offset (0, 0): the child's anchor lands on the parent's.
+      const next = [...obj.children, { object_id: childObjectId, x: 0, y: 0 }];
+      commitPatch('Add child', parentId, { children: obj.children }, { children: next });
+      set({ selectedChildIndex: next.length - 1 });
+    },
+
+    removeObjectChild: (parentId, index) => {
+      const obj = get().open?.project.objects.find((o) => o.id === parentId);
+      if (!obj || index < 0 || index >= obj.children.length) return;
+      const next = obj.children.filter((_, i) => i !== index);
+      commitPatch('Remove child', parentId, { children: obj.children }, { children: next });
+      set({ selectedChildIndex: null });
+    },
+
+    setObjectChildOffset: (parentId, index, x, y) => {
+      const obj = get().open?.project.objects.find((o) => o.id === parentId);
+      const child = obj?.children[index];
+      if (!obj || !child || !Number.isFinite(x) || !Number.isFinite(y)) return;
+      // Clamp to the editor bound, then snap to the metatile grid (the same
+      // round-to-nearest rule as the anchor; snapToGrid handles negatives).
+      const nx = snapToGrid(clamp(Math.round(x), -CHILD_OFFSET_LIMIT, CHILD_OFFSET_LIMIT));
+      const ny = snapToGrid(clamp(Math.round(y), -CHILD_OFFSET_LIMIT, CHILD_OFFSET_LIMIT));
+      if (nx === child.x && ny === child.y) return;
+      const next = obj.children.map((c, i) =>
+        i === index ? { ...c, x: nx, y: ny } : c,
+      );
+      commitPatch('Move child', parentId, { children: obj.children }, { children: next });
+    },
+
+    selectChild: (index) => set({ selectedChildIndex: index }),
+
+    refreshComposed: async () => {
+      const current = get().open;
+      const id = get().selectedObjectId;
+      const obj = current?.project.objects.find((o) => o.id === id);
+      if (!current || !id || !obj || obj.children.length === 0) {
+        const hadComposed = get().composed !== null;
+        set({ composed: null, composeError: null });
+        // Losing the last child (remove, undo) drops back to raw artwork.
+        if (hadComposed && current && id && obj) {
+          try {
+            const art = await api.readObjectArtwork(current.path, id);
+            if (get().selectedObjectId !== id) return;
+            useCanvasStore.getState().setArtwork({
+              objectId: id,
+              name: obj.name,
+              width: art.width,
+              height: art.height,
+              url: `data:image/png;base64,${art.data}`,
+            });
+          } catch (e) {
+            set({ error: String(e) });
+          }
+        }
+        return;
+      }
+      const seq = ++composeSeq;
+      try {
+        const composed = await api.composeObject(current.path, current.project, id);
+        if (seq !== composeSeq || get().selectedObjectId !== id) return;
+        set({ composed, composeError: null });
+        // Push the flattened artwork to the canvas only when the pixels
+        // actually changed (paints change overlays, not artwork), so the
+        // texture is not reloaded per stroke.
+        const canvas = useCanvasStore.getState();
+        const url = `data:image/png;base64,${composed.art_data}`;
+        if (canvas.artwork?.url !== url || canvas.artwork?.objectId !== id) {
+          canvas.setArtwork({
+            objectId: id,
+            name: obj.name,
+            width: composed.width,
+            height: composed.height,
+            url,
+          });
+        }
+      } catch (e) {
+        if (seq === composeSeq && get().selectedObjectId === id) {
+          set({ composeError: String(e), composed: null });
+        }
+      }
+    },
+
     paintCollision: (id, indices, value) => {
       const obj = get().open?.project.objects.find((o) => o.id === id);
       if (!obj || indices.length === 0) return;
+
+      // When the composed view is shown, the stroke arrives in composed-grid
+      // indices; translate back to the parent's own grid (M12).
+      const composed = get().selectedObjectId === id ? get().composed : null;
+      if (composed) {
+        indices = mapComposedCells(composed, obj, indices);
+        if (indices.length === 0) return;
+      }
 
       // A stroke is one undo step: snapshot the sparse map, apply every touched
       // cell, and commit before/after as a single command. The map is small
@@ -638,6 +868,14 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     paintOcclusion: (id, indices, occluding) => {
       const obj = get().open?.project.objects.find((o) => o.id === id);
       if (!obj || indices.length === 0) return;
+
+      // Composed-pixel indices translate back to the parent's own pixel
+      // space, mirroring paintCollision (M12).
+      const composed = get().selectedObjectId === id ? get().composed : null;
+      if (composed) {
+        indices = mapComposedPixels(composed, obj, indices);
+        if (indices.length === 0) return;
+      }
 
       // A stroke is one undo step: snapshot the sparse pixel set, apply every
       // touched pixel, and commit before/after as a single command (mirrors

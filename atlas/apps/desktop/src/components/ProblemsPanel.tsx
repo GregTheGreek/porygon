@@ -18,10 +18,12 @@ export function ProblemsPanel() {
   const budget = useProjectStore((s) => s.budget);
   const compileResult = useProjectStore((s) => s.compileResult);
   const compileError = useProjectStore((s) => s.compileError);
+  // The full object list rides along for the M12 cycle check (a loop can be
+  // created by editing another object, so the whole list is a refetch key).
+  const objects = useProjectStore((s) => s.open?.project.objects ?? null);
 
   // Tier 1 problems for the selected object, fetched from Rust (validity.rs)
-  // so the wording stays with the schema owner. Depends only on artwork
-  // dimensions, which are fixed per object, so this refetch key is enough.
+  // so the wording stays with the schema owner.
   const [tier1, setTier1] = useState<Problem[]>([]);
   useEffect(() => {
     if (!object) {
@@ -29,13 +31,13 @@ export function ProblemsPanel() {
       return;
     }
     let alive = true;
-    getObjectProblems(object)
+    getObjectProblems(object, objects ?? [])
       .then((p) => alive && setTier1(p))
       .catch(() => alive && setTier1([]));
     return () => {
       alive = false;
     };
-  }, [object?.id, object?.width, object?.height, object]);
+  }, [object?.id, object?.width, object?.height, object, objects]);
 
   if (!objectId && !tilesetId) {
     return <p className="text-sm text-fg-subtle">Select an object or tileset to see its problems.</p>;

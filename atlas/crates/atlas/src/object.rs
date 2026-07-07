@@ -36,6 +36,27 @@ pub struct Anchor {
     pub y: u32,
 }
 
+/// One child instance placed on an Object (M12, Scene Graph). `object_id`
+/// references another Object in the same project; membership is a reference,
+/// never ownership (the same object can be a child of many parents).
+///
+/// `x`/`y` are the offset, in pixels on the 16px grid, from the parent's
+/// anchor to the child's anchor. The bible derives child transforms from the
+/// Anchor ("Everything derives from it: Placement, Child transforms") and
+/// equates the Anchor with a Unity pivot / Godot origin, so the point that
+/// attaches an object to a map is the same point that attaches it inside a
+/// parent. Signed: children may sit above or left of the anchor.
+///
+/// Translation is the only transform: flips/rotation do not exist for Emerald
+/// metatile artwork authoring, and neither the bible nor compiler.md names any
+/// other child transform.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChildPlacement {
+    pub object_id: String,
+    pub x: i32,
+    pub y: i32,
+}
+
 /// Round a pixel coordinate to the nearest metatile-grid line. Pure.
 pub fn snap(value: u32) -> u32 {
     ((value + GRID / 2) / GRID) * GRID
@@ -69,6 +90,11 @@ pub struct Object {
     /// saved before M7.
     #[serde(default)]
     pub occlusion: Occlusion,
+    /// Child instances composited under this object's artwork (M12). Additive
+    /// with a serde default, so pre-M12 files load unchanged with no
+    /// format_version bump (same story as category/collision/occlusion).
+    #[serde(default)]
+    pub children: Vec<ChildPlacement>,
 }
 
 impl Object {
@@ -88,6 +114,7 @@ impl Object {
             tags: Vec::new(),
             collision: Collision::default(),
             occlusion: Occlusion::default(),
+            children: Vec::new(),
         }
     }
 
@@ -259,6 +286,37 @@ mod tests {
             "collision":{"cells":{"0":"Blocked"}}}"#;
         let o: Object = serde_json::from_str(json).unwrap();
         assert!(o.occlusion.pixels.is_empty());
+    }
+
+    #[test]
+    fn pre_m12_object_json_defaults_empty_children() {
+        // Objects saved before M12 lack `children`; it must default to empty so
+        // older projects load without a format_version bump.
+        let json = r#"{"id":"a","name":"Tree","width":32,"height":48,
+            "anchor":{"x":16,"y":48},"category":"Nature","tags":["tree"],
+            "collision":{"cells":{"0":"Blocked"}},"occlusion":{"pixels":[3]}}"#;
+        let o: Object = serde_json::from_str(json).unwrap();
+        assert!(o.children.is_empty());
+    }
+
+    #[test]
+    fn object_with_children_round_trips() {
+        let mut o = Object::new("House", 64, 64);
+        o.children.push(ChildPlacement {
+            object_id: "chimney".to_string(),
+            x: 16,
+            y: -48,
+        });
+        o.children.push(ChildPlacement {
+            object_id: "door".to_string(),
+            x: 0,
+            y: 0,
+        });
+        let json = serde_json::to_string(&o).unwrap();
+        let back: Object = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, o);
+        assert_eq!(back.children.len(), 2);
+        assert_eq!(back.children[0].y, -48);
     }
 
     #[test]

@@ -65,6 +65,9 @@ const CHECKER_A = 0x26262a;
 const CHECKER_B = 0x202024;
 const SELECTION_COLOR = 0x7c5cff;
 const ANCHOR_COLOR = 0xffb020;
+// Child-footprint highlight (M12): green, distinct from every other overlay
+// hue (selection purple, anchor orange, collision red/teal, occlusion pink).
+const CHILD_HIGHLIGHT_COLOR = 0x35d07f;
 // Crosshair arm length in screen pixels (zoom-independent).
 const ANCHOR_ARM = 7;
 
@@ -234,6 +237,13 @@ export class CanvasEngine {
   private selected = false;
   // The selected Object's anchor in artwork pixels; null hides the marker.
   private anchor: { x: number; y: number } | null = null;
+  // A highlighted child footprint in artwork pixels (M12); null hides it.
+  private childHighlight: { x: number; y: number; width: number; height: number } | null = null;
+  // Paintable region in artwork pixels (M12): when the composed view is
+  // shown, brushes may only touch the parent's own footprint - painted data
+  // lives on the parent, never on a child through the parent's canvas.
+  // Null means the whole artwork is paintable.
+  private paintBounds: { x: number; y: number; width: number; height: number } | null = null;
 
   // Collision state. `collisionCells` is the engine's render copy of the sparse
   // grid (row-major index -> value); React pushes it via setCollision and it is
@@ -368,13 +378,24 @@ export class CanvasEngine {
     this.drawCollisionLayer();
   }
 
-  async loadArtwork(art: ArtworkInput): Promise<void> {
+  /**
+   * Load (or reload) the artwork. `preserveView` keeps the current pan/zoom
+   * and selection when the dimensions are unchanged - used when the same
+   * object recomposes (M12) so a child nudge does not re-fit the view.
+   */
+  async loadArtwork(art: ArtworkInput, preserveView = false): Promise<void> {
     const img = new Image();
     img.src = art.url;
     await img.decode();
 
     const texture = Texture.from(img);
     texture.source.scaleMode = 'nearest'; // pixel art: never blur
+
+    const keepView =
+      preserveView &&
+      this.sprite !== null &&
+      this.artW === art.width &&
+      this.artH === art.height;
 
     if (this.sprite) {
       this.world.removeChild(this.sprite);
@@ -391,8 +412,12 @@ export class CanvasEngine {
     // Grab the raw pixels so the preview can reconstruct the above-player layer
     // (the real artwork pixels under the mask). Kept until the next artwork load.
     this.artworkPixels = readImagePixels(img, art.width, art.height);
-    this.setSelected(false);
-    this.fit();
+    if (!keepView) {
+      this.setSelected(false);
+      this.fit();
+    } else {
+      this.redraw();
+    }
     // fit() redraws the grid/overlay; the collision tint depends on artW/artH
     // now being set, so draw it once the artwork size is known.
     this.drawCollisionLayer();
@@ -490,6 +515,28 @@ export class CanvasEngine {
   setAnchor(anchor: { x: number; y: number } | null): void {
     this.anchor = anchor;
     this.drawOverlay();
+  }
+
+  /** Outline a child's footprint (artwork pixels, M12); null hides it. */
+  setChildHighlight(
+    rect: { x: number; y: number; width: number; height: number } | null,
+  ): void {
+    this.childHighlight = rect;
+    this.drawOverlay();
+  }
+
+  /** Restrict brushes to a region (artwork pixels, M12); null = everywhere. */
+  setPaintBounds(
+    bounds: { x: number; y: number; width: number; height: number } | null,
+  ): void {
+    this.paintBounds = bounds;
+  }
+
+  /** Whether an artwork pixel is inside the paintable region. */
+  private paintable(x: number, y: number): boolean {
+    const b = this.paintBounds;
+    if (!b) return true;
+    return x >= b.x && y >= b.y && x < b.x + b.width && y < b.y + b.height;
   }
 
   /** Return the play-mode player to its spawn cell. No data is touched. */
@@ -781,6 +828,19 @@ export class CanvasEngine {
       this.overlay
         .rect(x, y, w, h)
         .stroke({ width: 2 / r, color: SELECTION_COLOR, alpha: 0.95 });
+    }
+
+    // A selected child's footprint (M12), between the selection outline and
+    // the anchor so all three read at once.
+    if (this.childHighlight) {
+      const hb = this.childHighlight;
+      const x = snap(this.world.x + hb.x * scale);
+      const y = snap(this.world.y + hb.y * scale);
+      const w = snap(this.world.x + (hb.x + hb.width) * scale) - x;
+      const h = snap(this.world.y + (hb.y + hb.height) * scale) - y;
+      this.overlay
+        .rect(x, y, w, h)
+        .stroke({ width: 2 / r, color: CHILD_HIGHLIGHT_COLOR, alpha: 0.95 });
     }
 
     if (this.anchor) {
@@ -1085,6 +1145,11 @@ export class CanvasEngine {
   private paintCollisionAt(e: PointerEvent): void {
     const cell = this.cellAt(e);
     if (cell === null) return;
+    // Composed view (M12): only the parent's own cells are paintable.
+    const cols = Math.ceil(this.artW / COLLISION_CELL);
+    if (!this.paintable((cell % cols) * COLLISION_CELL, Math.floor(cell / cols) * COLLISION_CELL)) {
+      return;
+    }
     const current = this.collisionCells.get(cell);
     if (collisionValueEq(current, this.paintValue)) return; // no change
     if (this.paintValue === 'Walkable') this.collisionCells.delete(cell);
@@ -1107,6 +1172,8 @@ export class CanvasEngine {
         const x = pt.x + start + dx;
         const y = pt.y + start + dy;
         if (x < 0 || y < 0 || x >= this.artW || y >= this.artH) continue;
+        // Composed view (M12): only the parent's own pixels are paintable.
+        if (!this.paintable(x, y)) continue;
         const idx = y * this.artW + x;
         const has = this.occlusionPixels.has(idx);
         if (this.occlusionErase) {

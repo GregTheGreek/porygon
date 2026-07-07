@@ -492,32 +492,38 @@ fn build_problems(
     problems
 }
 
-/// A member Object with its artwork decoded from disk: the shared input for
+/// A member Object flattened with its children (M12): the shared input for
 /// budget prediction (M9) and export (M10). Both paths load members through
-/// `load_members`, so they can never disagree about membership, pixel data, or
-/// stale-id handling - the reconciliation compiler.md's determinism note asks
-/// for is structural, not by convention.
+/// `load_members`, so they can never disagree about membership, pixel data,
+/// composition, or stale-id handling - the reconciliation compiler.md's
+/// determinism note asks for is structural, not by convention.
 pub struct LoadedMember {
+    /// The member (root) Object: id, name, and metadata.
     pub object: crate::object::Object,
-    pub art: crate::artwork::DecodedArtwork,
+    /// The member composed with its children. Identical to the object's own
+    /// artwork/collision/occlusion when it has no children.
+    pub flat: crate::scene::Flattened,
+    /// Objects reachable through the member's children, excluding the member
+    /// itself. The export gate sweeps their Tier 1 problems too.
+    pub descendants: Vec<crate::object::Object>,
 }
 
 impl LoadedMember {
-    /// The budget-maths view of this member.
+    /// The budget-maths view of this member (composed).
     pub fn member_art(&self) -> MemberArt {
         MemberArt {
             name: self.object.name.clone(),
-            width: self.art.width,
-            height: self.art.height,
-            pixels: self.art.pixels.clone(),
-            occluding: self.object.occlusion.pixels.clone(),
+            width: self.flat.width,
+            height: self.flat.height,
+            pixels: self.flat.pixels.clone(),
+            occluding: self.flat.occlusion.clone(),
         }
     }
 }
 
-/// Read a tileset and its members' decoded artwork from disk. Members keep the
-/// tileset's stable authoring order (the exporter's layout order). Returns a
-/// plain error string for the UI.
+/// Read a tileset from disk and flatten each member with its children (M12).
+/// Members keep the tileset's stable authoring order (the exporter's layout
+/// order). Returns a plain error string for the UI.
 pub fn load_members(
     project_dir: &str,
     tileset_id: &str,
@@ -531,19 +537,28 @@ pub fn load_members(
         .cloned()
         .ok_or_else(|| "Tileset not found.".to_string())?;
 
+    // A membership id that no longer resolves to an Object is skipped rather
+    // than fatal: deletion scrubs ids, but a stale hand-edited file should
+    // still budget/export the objects it can find.
+    let roots: Vec<&str> = tileset
+        .members
+        .iter()
+        .map(String::as_str)
+        .filter(|id| open.project.objects.iter().any(|o| o.id == *id))
+        .collect();
+    let sources = crate::scene::load_sources(project_dir, &open.project.objects, roots)?;
+
     let mut members = Vec::with_capacity(tileset.members.len());
     for member_id in &tileset.members {
-        // A membership id that no longer resolves to an Object is skipped
-        // rather than fatal: deletion scrubs ids, but a stale hand-edited file
-        // should still budget/export the objects it can find.
         let Some(obj) = open.project.objects.iter().find(|o| &o.id == member_id) else {
             continue;
         };
-        let art = crate::object::decode_artwork(project_dir, &obj.id)
-            .map_err(|e| format!("Could not read artwork for \"{}\": {e}", obj.name))?;
+        let flat = crate::scene::flatten(&obj.id, &sources)
+            .map_err(|e| format!("Could not compose \"{}\": {e}", obj.name))?;
         members.push(LoadedMember {
             object: obj.clone(),
-            art,
+            flat,
+            descendants: crate::scene::descendants(&obj.id, &open.project.objects),
         });
     }
     Ok((tileset, members))
