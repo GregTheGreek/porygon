@@ -27,6 +27,38 @@ export type PaintMode = 'select' | 'collision' | 'occlusion' | 'play';
 // canopies quick to cover.
 export const OCCLUSION_BRUSH_SIZES = [1, 4, 8] as const;
 
+// The canvas preview backdrop (P2.1): what shows BEHIND the selected object's
+// artwork so the artist can judge how it reads on different ground. Pure view
+// state - never saved, never exported, never part of any Object or Tileset.
+// 'none' is the plain empty canvas; 'checker' is the transparency checker as an
+// explicit opt-in; 'color' fills a flat color; 'object' tiles another library
+// object's active artwork underneath (the rock-on-sand preview).
+export type BackdropKind = 'none' | 'checker' | 'color' | 'object';
+
+// A flat-color preset. Sensible grounds a prop typically sits on; `custom` is
+// the free color chosen with the native picker. Values are plain hex strings.
+export const BACKDROP_COLOR_PRESETS = [
+  { id: 'grass', label: 'Grass', color: '#5a8f3c' },
+  { id: 'sand', label: 'Sand', color: '#d9c48a' },
+  { id: 'water', label: 'Water', color: '#4a7fb5' },
+  { id: 'dirt', label: 'Dirt', color: '#8a6b4a' },
+] as const;
+
+export type Backdrop = {
+  kind: BackdropKind;
+  // The flat color when kind is 'color' (hex string, e.g. '#5a8f3c').
+  color: string;
+  // The library object tiled underneath when kind is 'object'; null falls back
+  // to no backdrop (also used when the chosen object is deleted).
+  objectId: string | null;
+};
+
+const DEFAULT_BACKDROP: Backdrop = {
+  kind: 'none',
+  color: BACKDROP_COLOR_PRESETS[0].color,
+  objectId: null,
+};
+
 type CanvasState = {
   artwork: CanvasArtwork | null;
   // True when the artwork is clicked/selected on the Canvas; drives the outline.
@@ -63,6 +95,11 @@ type CanvasState = {
   grid8: boolean;
   grid16: boolean;
 
+  // The preview backdrop (P2.1). A canvas-view setting like the grids: it
+  // survives selection changes (switching objects keeps the chosen ground) and
+  // is reset only on project close.
+  backdrop: Backdrop;
+
   setArtwork: (artwork: CanvasArtwork | null) => void;
   setSelected: (selected: boolean) => void;
   setPaintMode: (mode: PaintMode) => void;
@@ -76,6 +113,12 @@ type CanvasState = {
   setGrid16: (visible: boolean) => void;
   toggleGrid8: () => void;
   toggleGrid16: () => void;
+  // Backdrop setters (P2.1). setBackdropKind switches what shows behind the
+  // artwork; setBackdropColor and setBackdropObject adjust the params for the
+  // 'color' and 'object' kinds without changing the kind.
+  setBackdropKind: (kind: BackdropKind) => void;
+  setBackdropColor: (color: string) => void;
+  setBackdropObject: (objectId: string | null) => void;
   clear: () => void;
 };
 
@@ -91,6 +134,7 @@ export const useCanvasStore = create<CanvasState>((set) => ({
   previewEnabled: false,
   grid8: false,
   grid16: false,
+  backdrop: DEFAULT_BACKDROP,
 
   setArtwork: (artwork) => set({ artwork, selected: false }),
   setSelected: (selected) => set({ selected }),
@@ -105,8 +149,13 @@ export const useCanvasStore = create<CanvasState>((set) => ({
   setGrid16: (grid16) => set({ grid16 }),
   toggleGrid8: () => set((s) => ({ grid8: !s.grid8 })),
   toggleGrid16: () => set((s) => ({ grid16: !s.grid16 })),
+  setBackdropKind: (kind) => set((s) => ({ backdrop: { ...s.backdrop, kind } })),
+  setBackdropColor: (color) => set((s) => ({ backdrop: { ...s.backdrop, color } })),
+  setBackdropObject: (objectId) => set((s) => ({ backdrop: { ...s.backdrop, objectId } })),
   // Leaving a project resets the tool back to a neutral state. Grid visibility
   // is a UI preference, not project state, so it is deliberately not reset here.
+  // The backdrop IS reset: an 'object' backdrop references a project object id
+  // that would be stale in the next project.
   clear: () =>
     set({
       artwork: null,
@@ -118,5 +167,6 @@ export const useCanvasStore = create<CanvasState>((set) => ({
       occlusionErase: false,
       occlusionBrushSize: 4,
       previewEnabled: false,
+      backdrop: DEFAULT_BACKDROP,
     }),
 }));

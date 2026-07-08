@@ -17,13 +17,17 @@
 import { create } from 'zustand';
 
 import { useProjectStore } from './project';
+import { useToasts } from './toasts';
 
 // Surface a failed undo/redo through the project store's error field (the same
-// channel store actions use), so a filesystem failure mid-undo is shown to the
-// artist rather than lost as an unhandled rejection. Imported lazily via
-// getState() at call time, so the project<->history module cycle stays safe.
+// channel store actions use) and the always-visible toast surface (P2.1), so a
+// filesystem failure mid-undo is shown to the artist rather than lost as an
+// unhandled rejection. Imported lazily via getState() at call time, so the
+// project<->history module cycle stays safe.
 function reportHistoryError(action: 'undo' | 'redo', e: unknown) {
-  useProjectStore.setState({ error: `Could not ${action}: ${String(e)}` });
+  const message = `Could not ${action}: ${String(e)}`;
+  useProjectStore.setState({ error: message });
+  useToasts.getState().push({ kind: 'error', message });
 }
 
 export type Command = {

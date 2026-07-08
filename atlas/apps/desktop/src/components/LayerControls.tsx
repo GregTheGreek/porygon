@@ -1,4 +1,5 @@
 import { useCanvasStore } from '../store/canvas';
+import { BackdropControls } from './BackdropControls';
 import { CollisionControls } from './CollisionControls';
 import { OcclusionControls } from './OcclusionControls';
 import { PlayControls } from './PlayControls';
@@ -62,6 +63,8 @@ export function LayerControls({ onResetPlay }: { onResetPlay: () => void }) {
       >
         Preview
       </ToolbarButton>
+
+      <BackdropControls />
 
       {paintMode === 'collision' && <CollisionControls />}
       {paintMode === 'occlusion' && <OcclusionControls />}

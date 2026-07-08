@@ -17,6 +17,7 @@ import type {
 import { useCanvasStore } from './canvas';
 import { useHistory } from './history';
 import { usePreferences } from './preferences';
+import { useToasts } from './toasts';
 
 // Reflects whether the on-disk copy is up to date with the in-memory one.
 export type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
@@ -274,6 +275,14 @@ export const useProjectStore = create<ProjectState>((set, get) => {
   // never overwrite a newer one (strokes can queue several recomposes).
   let composeSeq = 0;
 
+  // Surface a user-facing failure through both channels: the `error` field
+  // (kept for the existing start-screen and canvas-pill readers) and the
+  // always-visible toast (P2.1). One call per failure, never per retry.
+  const fail = (message: string) => {
+    set({ error: message });
+    useToasts.getState().push({ kind: 'error', message });
+  };
+
   const flushSave = async () => {
     const current = get().open;
     if (!current) return;
@@ -286,7 +295,8 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         open: s.open ? { ...s.open, project } : null,
       }));
     } catch (e) {
-      set({ status: 'error', error: String(e) });
+      set({ status: 'error' });
+      fail(String(e));
     }
   };
 
@@ -339,7 +349,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         url: `data:image/png;base64,${art.data}`,
       });
     } catch (e) {
-      set({ error: String(e) });
+      fail(String(e));
     }
   };
 
@@ -381,7 +391,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         url: `data:image/png;base64,${art.data}`,
       });
     } catch (e) {
-      set({ error: String(e) });
+      fail(String(e));
     }
   };
 
@@ -411,7 +421,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         },
       });
     } catch (e) {
-      set({ error: String(e) });
+      fail(String(e));
     } finally {
       set({ importing: false });
     }
@@ -633,7 +643,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       try {
         set({ recents: await api.getRecentProjects() });
       } catch (e) {
-        set({ error: String(e) });
+        fail(String(e));
       }
     },
 
@@ -644,7 +654,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         set({ open, status: 'saved', error: null });
         await get().loadRecents();
       } catch (e) {
-        set({ error: String(e) });
+        fail(String(e));
       }
     },
 
@@ -655,7 +665,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         set({ open, status: 'saved', error: null });
         await get().loadRecents();
       } catch (e) {
-        set({ error: String(e) });
+        fail(String(e));
       }
     },
 
@@ -769,11 +779,11 @@ export const useProjectStore = create<ProjectState>((set, get) => {
 
     importObjectFromPath: async (path) => {
       if (!get().open) {
-        set({ error: 'Open or create a project before importing artwork.' });
+        fail('Open or create a project before importing artwork.');
         return;
       }
       if (!/\.png$/i.test(path)) {
-        set({ error: 'Only PNG files can be imported as objects.' });
+        fail('Only PNG files can be imported as objects.');
         return;
       }
       await importObjectFrom(path);
@@ -826,7 +836,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           },
         });
       } catch (e) {
-        set({ error: String(e) });
+        fail(String(e));
       }
     },
 
@@ -891,7 +901,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           },
         });
       } catch (e) {
-        set({ error: String(e) });
+        fail(String(e));
       }
     },
 
@@ -935,7 +945,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           redo: () => apply(nextVariants, variant.id),
         });
       } catch (e) {
-        set({ error: String(e) });
+        fail(String(e));
       } finally {
         set({ importing: false });
       }
@@ -970,7 +980,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           redo: () => apply(nextVariants, variant.id),
         });
       } catch (e) {
-        set({ error: String(e) });
+        fail(String(e));
       }
     },
 
@@ -1028,7 +1038,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           redo: () => apply(updated.variants, updated.active_variant),
         });
       } catch (e) {
-        set({ error: String(e) });
+        fail(String(e));
       }
     },
 
@@ -1132,7 +1142,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
               url: `data:image/png;base64,${art.data}`,
             });
           } catch (e) {
-            set({ error: String(e) });
+            fail(String(e));
           }
         }
         return;
@@ -1257,7 +1267,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           },
         });
       } catch (e) {
-        set({ error: String(e) });
+        fail(String(e));
       }
     },
 
@@ -1431,7 +1441,13 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         if (get().selectedTilesetId !== tilesetId) return;
         set({ compileResult: result });
       } catch (e) {
-        if (get().selectedTilesetId === tilesetId) set({ compileError: String(e) });
+        // Pre-flight failures (bad binary, filesystem, Tier 1/2 gate) keep the
+        // compileError field for the Problems panel and also raise a toast so
+        // the failure is visible from any panel (P2.1).
+        if (get().selectedTilesetId === tilesetId) {
+          set({ compileError: String(e) });
+          useToasts.getState().push({ kind: 'error', message: String(e) });
+        }
       } finally {
         if (get().selectedTilesetId === tilesetId) set({ compiling: false });
       }

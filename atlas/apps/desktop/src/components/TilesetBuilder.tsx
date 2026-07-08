@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useProjectStore } from '../store/project';
+import { useToasts } from '../store/toasts';
 import { pickDirectory, pickFile, setPorytilesPath, verifyPorytiles } from '../lib/api';
 import type { AtlasObject, BinaryStatus } from '../lib/api';
 import { BudgetMeter } from './BudgetMeter';
@@ -104,6 +105,7 @@ export function TilesetBuilder() {
       setExportedPath(result.path);
     } catch (e) {
       setExportError(String(e));
+      useToasts.getState().push({ kind: 'error', message: String(e) });
     } finally {
       setExporting(false);
     }
@@ -124,6 +126,7 @@ export function TilesetBuilder() {
       setBinary(await verifyPorytiles());
     } catch (e) {
       setBinary({ ok: false, path, version: null, message: String(e) });
+      useToasts.getState().push({ kind: 'error', message: String(e) });
     }
   };
 

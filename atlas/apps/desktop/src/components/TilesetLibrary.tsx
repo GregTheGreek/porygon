@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useProjectStore } from '../store/project';
+import { useToasts } from '../store/toasts';
 import { useUiStore, type MenuItem } from '../store/ui';
 import { pickDirectory } from '../lib/api';
 import { OBJECT_DRAG_TYPE } from './ObjectLibrary';
@@ -106,6 +107,7 @@ function TilesetRow({
         await exportTileset(id, dest);
       } catch (err) {
         useProjectStore.setState({ error: String(err) });
+        useToasts.getState().push({ kind: 'error', message: String(err) });
       }
     };
     // Compile/export are only meaningful with members; the store still gates

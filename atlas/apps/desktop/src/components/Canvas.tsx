@@ -1,9 +1,14 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { CanvasEngine } from '../canvas/CanvasEngine';
 import { useCanvasStore } from '../store/canvas';
 import { useProjectStore } from '../store/project';
 import { LayerControls } from './LayerControls';
-import type { CollisionValue } from '../lib/api';
+import { readObjectArtwork, type CollisionValue } from '../lib/api';
+
+// Parse a '#rrggbb' hex string to the numeric color Pixi expects.
+function hexToNumber(hex: string): number {
+  return Number.parseInt(hex.replace('#', ''), 16) || 0;
+}
 
 // Stable empty map/array for selections with no painted collision/occlusion, so
 // the selectors below never return a fresh reference and loop renders.
@@ -36,6 +41,10 @@ export function Canvas() {
   // Its collision/occlusion/anchor supersede the object's own on the canvas,
   // so overlays and play mode operate on the flattened result.
   const composed = useProjectStore((s) => s.composed);
+  // Canvas-local failures that stay on the pill: composeError is specific to
+  // this view and engineError is set below. The generic project `error` now
+  // surfaces on the always-visible toast layer (P2.1), so it is not repeated
+  // here to avoid showing the same message twice.
   const composeError = useProjectStore((s) => s.composeError);
   const selectedChildIndex = useProjectStore((s) => s.selectedChildIndex);
   const refreshComposed = useProjectStore((s) => s.refreshComposed);
@@ -43,7 +52,6 @@ export function Canvas() {
   // Any object edit (paint, child add/remove/nudge, anchor, undo/redo) can
   // change the composition, so the objects array reference drives refresh.
   const objects = useProjectStore((s) => s.open?.project.objects ?? null);
-  const error = useProjectStore((s) => s.error);
   const importing = useProjectStore((s) => s.importing);
   const importObject = useProjectStore((s) => s.importObject);
   const hasObjects = useProjectStore((s) => (s.open?.project.objects.length ?? 0) > 0);
@@ -77,6 +85,21 @@ export function Canvas() {
   const occlusionBrushSize = useCanvasStore((s) => s.occlusionBrushSize);
   const previewEnabled = useCanvasStore((s) => s.previewEnabled);
 
+  // Preview backdrop (P2.1). A canvas-view setting behind the artwork. For the
+  // 'object' kind we resolve the chosen object's active-variant artwork and
+  // hand a data URL to the engine; the engine tiles it behind the sprite.
+  const backdrop = useCanvasStore((s) => s.backdrop);
+  const projectPath = useProjectStore((s) => s.open?.path ?? null);
+  // The backdrop object's active variant keys the artwork read, so a variant
+  // switch (or the object being deleted) re-resolves the backdrop, while an
+  // unrelated edit does not.
+  const backdropObjVariant = useProjectStore((s) => {
+    const id = useCanvasStore.getState().backdrop.objectId;
+    return id
+      ? s.open?.project.objects.find((o) => o.id === id)?.active_variant ?? null
+      : null;
+  });
+
   // Grid visibility lives in the canvas store (M14) so shortcuts, the command
   // palette, and the default-grid preference can drive it too.
   const show8 = useCanvasStore((s) => s.grid8);
@@ -86,6 +109,49 @@ export function Canvas() {
 
   const [zoom, setZoom] = useState(100);
   const [engineError, setEngineError] = useState<string | null>(null);
+
+  // Resolve the current backdrop from live store state and push it to the
+  // engine. Reads getState so it can run both from the mount handler (which
+  // fires before the reactive effects wire up) and the effect below. A seq
+  // guard keeps an older async object-read from overwriting a newer choice.
+  const backdropApplySeq = useRef(0);
+  const applyBackdrop = useCallback(async () => {
+    const engine = engineRef.current;
+    if (!engine) return;
+    const seq = ++backdropApplySeq.current;
+    const b = useCanvasStore.getState().backdrop;
+    if (b.kind === 'none' || b.kind === 'checker') {
+      await engine.setBackdrop({ kind: b.kind });
+      return;
+    }
+    if (b.kind === 'color') {
+      await engine.setBackdrop({ kind: 'color', color: hexToNumber(b.color) });
+      return;
+    }
+    // kind === 'object': tile the chosen object's active-variant artwork.
+    const project = useProjectStore.getState();
+    const path = project.open?.path ?? null;
+    const obj = b.objectId
+      ? project.open?.project.objects.find((o) => o.id === b.objectId) ?? null
+      : null;
+    if (!b.objectId || !path) {
+      await engine.setBackdrop({ kind: 'none' });
+      return;
+    }
+    // The chosen object was deleted: fall back to None (and reset the choice).
+    if (!obj) {
+      useCanvasStore.getState().setBackdropObject(null);
+      await engine.setBackdrop({ kind: 'none' });
+      return;
+    }
+    try {
+      const art = await readObjectArtwork(path, obj.id, obj.active_variant);
+      if (seq !== backdropApplySeq.current) return;
+      await engine.setBackdrop({ kind: 'object', url: `data:image/png;base64,${art.data}` });
+    } catch {
+      if (seq === backdropApplySeq.current) await engine.setBackdrop({ kind: 'none' });
+    }
+  }, []);
 
   // Create the Pixi engine once. Init is async, so guard against unmount.
   useEffect(() => {
@@ -152,6 +218,9 @@ export function Canvas() {
             : null,
         );
         if (canvas.artwork) void engine.loadArtwork(canvas.artwork);
+        // Restore the backdrop on (re)mount: the store setting survives while
+        // the engine is freshly created.
+        void applyBackdrop();
       })
       .catch((e: unknown) => {
         // A failed renderer init must be visible, not a silent blank canvas.
@@ -270,6 +339,14 @@ export function Canvas() {
     engineRef.current?.setPreview(previewEnabled);
   }, [previewEnabled]);
 
+  // Push backdrop changes into the engine. Re-resolves when the backdrop
+  // setting changes, when the chosen object's active variant changes, or when
+  // the project path changes. `backdropObjVariant` becoming null (object
+  // deleted) triggers the fallback to None inside applyBackdrop.
+  useEffect(() => {
+    void applyBackdrop();
+  }, [applyBackdrop, backdrop, backdropObjVariant, projectPath]);
+
   const hasArtwork = artwork !== null;
 
   return (
@@ -330,9 +407,9 @@ export function Canvas() {
           </div>
         )}
 
-        {(engineError ?? composeError ?? error) && (
+        {(engineError ?? composeError) && (
           <p className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded border border-red-500/40 bg-red-500/10 px-3 py-1.5 text-xs text-red-300">
-            {engineError ?? composeError ?? error}
+            {engineError ?? composeError}
           </p>
         )}
       </div>

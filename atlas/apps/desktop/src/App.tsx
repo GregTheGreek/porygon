@@ -7,6 +7,7 @@ import { CommandPalette } from './components/CommandPalette';
 import { ShortcutsHelp } from './components/ShortcutsHelp';
 import { Preferences } from './components/Preferences';
 import { ContextMenuHost } from './components/ContextMenu';
+import { Toasts } from './components/Toasts';
 import { getAppVersion } from './lib/api';
 import { useProjectStore } from './store/project';
 import { useCanvasStore } from './store/canvas';
@@ -89,6 +90,7 @@ export function App() {
       <ShortcutsHelp />
       <Preferences />
       <ContextMenuHost />
+      <Toasts />
 
       {open && dropActive && (
         <div className="pointer-events-none fixed inset-0 z-40 flex items-center justify-center border-2 border-dashed border-accent bg-accent/10">

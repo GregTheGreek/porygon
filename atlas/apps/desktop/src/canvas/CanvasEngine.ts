@@ -48,6 +48,15 @@ export type ArtworkInput = {
   url: string;
 };
 
+// The preview backdrop rendered behind the artwork (P2.1). 'checker' is the
+// transparency checker; 'color' is a flat fill; 'object' tiles another object's
+// artwork (passed as a decoded PNG data URL). Preview-only: never exported.
+export type BackdropSpec =
+  | { kind: 'none' }
+  | { kind: 'checker' }
+  | { kind: 'color'; color: number }
+  | { kind: 'object'; url: string };
+
 const MIN_SCALE = 0.25;
 const MAX_SCALE = 32;
 const FIT_PADDING = 0.9;
@@ -218,6 +227,17 @@ export class CanvasEngine {
   private gridLayer!: Graphics;
   private overlay!: Graphics;
 
+  // Preview backdrop (P2.1): a world-space layer BEHIND the artwork sprite,
+  // tiled to fill the artwork bounds so it tracks pan/zoom and aligns to the
+  // object. Rebuilt on spec change and on artwork (re)load.
+  private backdropLayer!: Container;
+  private backdropSpec: BackdropSpec = { kind: 'none' };
+  // Textures we own and must destroy on rebuild/teardown.
+  private backdropObjectTexture: Texture | null = null;
+  private backdropCheckerTexture: Texture | null = null;
+  // Guards the async 'object' decode against a newer setBackdrop call.
+  private backdropSeq = 0;
+
   // World-space occlusion + preview layers (created once in init).
   private occlusionTint!: Sprite;
   private previewPlayer!: Graphics;
@@ -335,15 +355,22 @@ export class CanvasEngine {
       height: this.viewportH,
     });
     this.world = new Container();
-    // World-space occlusion + preview layers, in z-order (artwork is inserted
-    // at index 0 in loadArtwork so it stays beneath these).
+    // World-space layers, in z-order. The backdrop is the bottom-most child so
+    // it renders behind everything; the artwork sprite is inserted just above
+    // it (below the occlusion/preview layers) in loadArtwork.
+    this.backdropLayer = new Container();
     this.occlusionTint = new Sprite();
     this.previewPlayer = new Graphics();
     this.previewTop = new Sprite();
     this.occlusionTint.visible = false;
     this.previewPlayer.visible = false;
     this.previewTop.visible = false;
-    this.world.addChild(this.occlusionTint, this.previewPlayer, this.previewTop);
+    this.world.addChild(
+      this.backdropLayer,
+      this.occlusionTint,
+      this.previewPlayer,
+      this.previewTop,
+    );
 
     this.collisionLayer = new Graphics();
     this.gridLayer = new Graphics();
@@ -362,6 +389,10 @@ export class CanvasEngine {
 
   destroy(): void {
     this.detachInput();
+    // Free the backdrop textures we generated ourselves (not attached to the
+    // stage tree, so app.destroy would not reach them).
+    this.backdropObjectTexture?.destroy(true);
+    this.backdropCheckerTexture?.destroy(true);
     // Destroy the app, its canvas, and all GPU resources.
     this.app?.destroy(true, { children: true, texture: true });
   }
@@ -403,9 +434,10 @@ export class CanvasEngine {
     }
     this.sprite = new Sprite(texture);
     this.sprite.roundPixels = true;
-    // Index 0: the artwork sits beneath the occlusion/preview layers so the
-    // preview's top layer can render over the player.
-    this.world.addChildAt(this.sprite, 0);
+    // Insert the artwork just below the occlusion/preview layers but ABOVE the
+    // backdrop, so the backdrop stays behind the artwork and the preview's top
+    // layer still renders over the player.
+    this.world.addChildAt(this.sprite, this.world.getChildIndex(this.occlusionTint));
 
     this.artW = art.width;
     this.artH = art.height;
@@ -422,6 +454,8 @@ export class CanvasEngine {
     // now being set, so draw it once the artwork size is known.
     this.drawCollisionLayer();
     this.refreshOcclusion();
+    // The backdrop is sized to the artwork bounds, so rebuild it on any load.
+    this.rebuildBackdrop();
     // Switching objects while in play mode respawns the player on the new grid
     // (enterPlay also covers the mount case where play mode was set before the
     // artwork finished loading).
@@ -444,11 +478,44 @@ export class CanvasEngine {
     this.redraw();
     this.drawCollisionLayer();
     this.refreshOcclusion();
+    // No artwork means no bounds to fill; hide the backdrop.
+    this.rebuildBackdrop();
   }
 
   setGrid(config: GridConfig): void {
     this.grid = config;
     this.drawGridLayer();
+  }
+
+  /**
+   * Set the preview backdrop rendered behind the artwork (P2.1). The 'object'
+   * kind decodes its PNG asynchronously; a newer call supersedes an in-flight
+   * decode. Preview-only: the backdrop never affects export or any data.
+   */
+  async setBackdrop(spec: BackdropSpec): Promise<void> {
+    const seq = ++this.backdropSeq;
+    if (spec.kind === 'object') {
+      const img = new Image();
+      img.src = spec.url;
+      try {
+        await img.decode();
+      } catch {
+        // A bad/blank data URL just means no backdrop; fall back cleanly.
+        if (seq === this.backdropSeq) {
+          this.backdropSpec = { kind: 'none' };
+          this.rebuildBackdrop();
+        }
+        return;
+      }
+      if (seq !== this.backdropSeq) return; // superseded while decoding
+      this.backdropObjectTexture?.destroy(true);
+      const tex = Texture.from(img);
+      tex.source.scaleMode = 'nearest';
+      this.backdropObjectTexture = tex;
+    }
+    if (seq !== this.backdropSeq) return;
+    this.backdropSpec = spec;
+    this.rebuildBackdrop();
   }
 
   /** Replace the collision grid to render (row-major index -> value). */
@@ -1290,6 +1357,49 @@ export class CanvasEngine {
       .rect(x, y, PLAYER_W, PLAYER_H)
       .fill({ color: PLAYER_FILL, alpha: PLAYER_ALPHA });
     this.previewPlayer.visible = true;
+  }
+
+  // Rebuild the backdrop layer for the current spec + artwork size. The layer
+  // fills the artwork's bounds (0,0)-(artW,artH) in world space, so it tracks
+  // pan/zoom and sits exactly behind the object. Filling the artwork bounds
+  // (rather than the whole viewport) keeps the preview honest: the backdrop is
+  // the ground directly under the object being judged.
+  private rebuildBackdrop(): void {
+    // Drop the previous child(ren). The checker/object source textures are
+    // engine-owned (freed on rebuild/teardown), so do not destroy them here.
+    for (const child of this.backdropLayer.removeChildren()) {
+      child.destroy({ children: true, texture: false });
+    }
+    const spec = this.backdropSpec;
+    if (!this.sprite || this.artW <= 0 || spec.kind === 'none') {
+      this.backdropLayer.visible = false;
+      return;
+    }
+    let child: Container | null = null;
+    if (spec.kind === 'color') {
+      child = new Graphics().rect(0, 0, this.artW, this.artH).fill(spec.color);
+    } else if (spec.kind === 'checker') {
+      if (!this.backdropCheckerTexture) {
+        this.backdropCheckerTexture = this.makeCheckerTexture();
+      }
+      child = new TilingSprite({
+        texture: this.backdropCheckerTexture,
+        width: this.artW,
+        height: this.artH,
+      });
+    } else if (spec.kind === 'object' && this.backdropObjectTexture) {
+      child = new TilingSprite({
+        texture: this.backdropObjectTexture,
+        width: this.artW,
+        height: this.artH,
+      });
+    }
+    if (!child) {
+      this.backdropLayer.visible = false;
+      return;
+    }
+    this.backdropLayer.addChild(child);
+    this.backdropLayer.visible = true;
   }
 
   private makeCheckerTexture(): Texture {
