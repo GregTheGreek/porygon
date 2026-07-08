@@ -2,7 +2,7 @@
 
 > Where Atlas goes after the MVP, and where it deliberately does not.
 
-Version: 0.1 draft
+Version: 0.2
 
 > **Naming:** Atlas is the internal codename. The product ships as **Porygon**.
 
@@ -99,9 +99,9 @@ Each milestone keeps the MVP rules: shippable at every step, Rust owns schemas, 
 
 ---
 
-# Open Questions for Discussion
+# Resolved Decisions (2026-07-08)
 
-1. Does a Ground attach to a prop (each prop knows its ground) or to a Tileset (one default ground, per-prop overrides)? Tileset-level default with per-prop override is the current lean.
-2. Should ground swaps be a variant-like switcher on the prop (summer-sand vs winter-snow ground pairs compose with artwork variants)?
-3. Hot reload and undo: a reload is an external mutation - does it push an undo entry (restore previous pixels) or is it fire-and-forget like play mode? Current lean: undoable, artwork bytes are cheap to keep for one step.
-4. .ase parsing depth: flattened composite only, or import Aseprite layer groups as scene children? Start flattened; children-from-groups is a later convenience.
+1. **Ground attachment**: Tileset-level default ground with per-prop override.
+2. **Grounds and variants are orthogonal.** Atlas does not model paired seasonal ground/artwork combinations; a ground swap and a variant switch are independent operations that happen to compose. No pairing mechanism.
+3. **Hot reload is undoable.** A reload pushes an undo entry restoring the previous pixels; artwork bytes are cheap to keep for one step.
+4. **.ase import starts flattened.** Layer-groups-as-scene-children is a possible later convenience, not Phase 2 scope.
