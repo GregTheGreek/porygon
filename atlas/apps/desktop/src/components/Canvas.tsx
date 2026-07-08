@@ -351,16 +351,19 @@ export function Canvas() {
 
   return (
     <div className="flex h-full min-w-0 flex-col bg-bg">
-      <div className="flex h-8 shrink-0 items-center justify-between gap-3 border-b border-bg-border px-3">
-        <div className="flex items-center gap-2 text-xs">
-          <span className="font-medium uppercase tracking-wide text-fg-muted">
+      <div className="flex h-8 shrink-0 items-center gap-3 border-b border-bg-border px-3">
+        {/* The left cluster grows with the active tool's controls, so it scrolls
+            horizontally when it outgrows the bar; the zoom controls stay pinned
+            on the right and always reachable. */}
+        <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto whitespace-nowrap text-xs">
+          <span className="shrink-0 font-medium uppercase tracking-wide text-fg-muted">
             Canvas
           </span>
           {hasArtwork && (
             <LayerControls onResetPlay={() => engineRef.current?.resetPlayer()} />
           )}
         </div>
-        <div className="flex items-center gap-1 text-xs">
+        <div className="flex shrink-0 items-center gap-1 text-xs">
           <GridToggle label="8" title="Toggle 8px tile grid (Shift+G)" active={show8} onClick={toggleGrid8} />
           <GridToggle label="16" title="Toggle 16px metatile grid (G)" active={show16} onClick={toggleGrid16} />
           <span className="mx-1 h-4 w-px bg-bg-border" />

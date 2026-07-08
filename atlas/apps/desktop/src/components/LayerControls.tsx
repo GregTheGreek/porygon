@@ -22,7 +22,9 @@ export function LayerControls({ onResetPlay }: { onResetPlay: () => void }) {
   const setPreviewEnabled = useCanvasStore((s) => s.setPreviewEnabled);
 
   return (
-    <div className="flex items-center gap-1">
+    // shrink-0 so buttons keep their natural width and the parent bar scrolls
+    // rather than squishing the cluster.
+    <div className="flex shrink-0 items-center gap-1 [&>*]:shrink-0">
       <ToolbarButton active={paintMode === 'select'} onClick={() => setPaintMode('select')}>
         Select
       </ToolbarButton>
