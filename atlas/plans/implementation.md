@@ -594,6 +594,8 @@ Ready for community feedback.
 * Maps inside Atlas
 * Direct Porymap integration beyond prefabs
 
+Phase 2 direction (hot reload, .ase import, grounds/bottom-layer authoring, and the positioning decision versus art tools) is drafted in `phase2.md`.
+
 ---
 
 # Engineering Rules
